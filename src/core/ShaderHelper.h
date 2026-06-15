@@ -1,3 +1,5 @@
+#include <SDL3/SDL.h>
+
 SDL_Window *window;
 SDL_GPUDevice *device;
 SDL_GPUBuffer *vertexBuffer;
