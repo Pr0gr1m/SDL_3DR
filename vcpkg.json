@@ -1,0 +1,19 @@
+{
+  "name": "sdl1",
+  "version": "1.0.0",
+  "dependencies": [
+    {
+      "name": "sdl3",
+      "features": [
+        "vulkan"
+      ]
+    },
+    {
+      "name": "sdl3-image",
+      "features": [
+        "jpeg"
+      ]
+    },
+    "sdl3-ttf"
+  ]
+}
