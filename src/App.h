@@ -94,8 +94,12 @@ private:
     SDL_GPUGraphicsPipeline *lineGraphicsPipeline = nullptr;
 
     SDL_GPUTexture *depthTexture = nullptr;
+
+    //TODO: dont have one default normal and colour texture or sampler
     SDL_GPUTexture *normalTexture = nullptr;
     SDL_GPUSampler *normalSampler = nullptr;
+    SDL_GPUTexture *colourTexture = nullptr;
+    SDL_GPUSampler *colourSampler = nullptr;
 
     Uint64 deltaTimeMS = 0;
     Uint64 currentMillisecondsSinceStart;
