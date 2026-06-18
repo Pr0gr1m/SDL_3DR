@@ -1,0 +1,20 @@
+Initializing SDL library.. 0.000100 ms
+Initializing SDL Window.. 0.000100 ms
+Initializing SDL GPU device.. 0.000100 ms
+Supported GPU drivers: 
+	Detected driver: direct3d12
+	Detected driver: vulkan
+Using preffered driver: vulkan
+Selected GPU driver: vulkan
+Claiming window for GPU device.. 0.000100 ms
+Setting GPU swapchain parameters.. 0.000100 ms
+Loaded vertex shader from C:\Users\szymo\CLionProjects\SDL1\build\../src/shaders/vertex.spv, size: 1752
+Vertex shader created: 0000026AD53F2A40
+Loading and creating fragment shaders.. 0.000100 ms
+Loaded fragment shader from C:\Users\szymo\CLionProjects\SDL1\build\../src/shaders/fragment.spv, size: 2728
+First 50 chars: #
+Fragment shader created: 0000026AD53F2FE0
+Creating GPU pipelines infos.. 0.000100 ms
+Creating the GPU pipeline.. 0.000100 ms
+Graphics pipeline created: 0000026ACAD06CF0
+Line graphics pipeline created: 0000026ACAD06450

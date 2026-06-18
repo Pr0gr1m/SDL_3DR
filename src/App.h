@@ -74,6 +74,8 @@ private:
 
     SDL_AppResult OnQuit() const;
 
+    bool UploadDirtTexturesToGPU();
+
     SDL_AppResult OnRender();
 
     SDL_AppResult OnUpdate();
@@ -85,8 +87,6 @@ private:
     RaycastHit CheckIsPointInsideAny(Vector) const;
 
     RaycastHit RaycastRay(Vector, Vector, float maxDistance = 1) const;
-
-    bool LoadNormalTexture();
 
     SDL_GPUBuffer *sceneVertexBuffer = nullptr;
     Uint32 sceneVertexBufferSize = 0;
@@ -100,6 +100,8 @@ private:
     SDL_GPUSampler *normalSampler = nullptr;
     SDL_GPUTexture *colourTexture = nullptr;
     SDL_GPUSampler *colourSampler = nullptr;
+
+    char *basePath;
 
     Uint64 deltaTimeMS = 0;
     Uint64 currentMillisecondsSinceStart;

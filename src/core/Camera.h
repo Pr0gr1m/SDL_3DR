@@ -87,26 +87,14 @@ public:
     }
 
     Matrix4D GetProjectionMatrix() {
-        // float aspect = 16.f / 9.f; // width / height
-        //
-        // float fovRad = fovY * DEG_2_RAD;
-        // float f = 1.0f / tan(fovRad / 2.0f);
-        //
-        // return Matrix4D(
-        //     f / aspect, 0, 0, 0,
-        //     0, f, 0, 0,
-        //     0, 0, (far + near) / (near - far), (2 * far * near) / (near - far),
-        //     0, 0, -1, 0
-        // );
-        // float aspect = 16.f / 9.f; // width / height
-
         float fovRad = fovY * DEG_2_RAD;
         float f = 1.0f / tan(fovRad / 2.0f);
 
+        // Vulkan style: z in [0,1]
         return Matrix4D(
             f / aspect, 0, 0, 0,
             0, f, 0, 0,
-            0, 0, (far + near) / (near - far), (2 * far * near) / (near - far),
+            0, 0, far / (near - far), -(far * near) / (far - near),
             0, 0, -1, 0
         );
     }
