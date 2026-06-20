@@ -71,40 +71,6 @@ layout (location = 3) out vec3 v_tangent;
 
 void main()
 {
-    mat4 identity = mat4(
-            1.0, 0.0, 0.0, 0.0,
-            0.0, 1.0, 0.0, 0.0,
-            0.0, 0.0, 1.0, 0.0,
-            0.0, 0.0, 0.0, 1.0
-    );
-
-    float fovD = radians(60);
-    float f = 1.0 / tan(radians(60.0) / 2.0);  // ≈ 1.73205
-    float aspect = 1600.0 / 900.0;              // ≈ 1.77778
-    float near = 0.1;
-    float far = 100;
-
-    mat4 proj = mat4(
-            1 / (aspect * tan(fovD / 2)), 0.000, 0.000, 0.000,
-            0.000, 1 / (tan(fovD / 2)), 0.000, 0.000,
-            0.000, 0.000, -1.001, -2.102,
-            0.000, 0.000, -1.000, 2.000
-    );
-
-    vec3 position = vec3(0, 1, 0);
-    vec3 right = vec3(1, 0, 0);
-    vec3 up = vec3(0, 1, 0);
-    vec3 forward = vec3(0, 0, 1);
-
-    mat4 view = mat4(
-            right.x, right.y, right.z, -dot(right, position),
-            up.x, up.y, up.z, -dot(up, position),
-            -forward.x, -forward.y, -forward.z, dot(forward, position),
-            0, 0, 0, 1
-    );
-
-    mat4 viewProj = proj * view;
-
     gl_Position = ubo.viewProjection * vec4(a_position, 1.0);
     v_color = a_color;
     v_normal = a_normal;

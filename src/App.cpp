@@ -155,12 +155,17 @@ SDL_AppResult App::Init() {
         return FAILURE;
     }
 
-    this->basePath = const_cast<char *>(SDL_GetBasePath());
-
     SDL_Log("Initializing SDL Window.. %f ms", start / 1000000.0);
     m_Window.reset(SDL_CreateWindow("SDL1", screenWidth, screenHeight, SDL_WINDOW_HIDDEN));
 
     SDL_SetWindowRelativeMouseMode(m_Window.get(), true); //Fullscreen mode
+
+    //Get base path to build directionary
+    this->basePath = const_cast<char *>(SDL_GetBasePath());
+
+    if (basePath == nullptr) {
+        SDL_Log("Getting base path failed (nullptr): %s", SDL_GetError());
+    }
 
     if (!m_Window) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not initialize SDL window: %s", SDL_GetError());
@@ -217,7 +222,6 @@ SDL_AppResult App::Init() {
     SDL_Log("Setting GPU swapchain parameters.. %f ms", start / 1000000.0);
     SDL_SetGPUSwapchainParameters(m_gpuDevice.get(), m_Window.get(), SDL_GPU_SWAPCHAINCOMPOSITION_SDR, presentMode);
 
-    char *basePath = const_cast<char *>(SDL_GetBasePath());
     std::string vPath = std::string(basePath) + "src/shaders/vertex.spv";
     std::string fPath = std::string(basePath) + "src/shaders/fragment.spv";
 
@@ -250,9 +254,6 @@ SDL_AppResult App::Init() {
     if (!vertexShader) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create vertex shader: %s", SDL_GetError());
     }
-    const char *err = SDL_GetError();
-    SDL_Log("SDL Error: %s", err);
-
     SDL_Log("Vertex shader created: %p", vertexShader);
     fflush(stdout);
     SDL_free(vertexShaderCode);
@@ -278,7 +279,7 @@ SDL_AppResult App::Init() {
         .entrypoint = "main",
         .format = SDL_GPU_SHADERFORMAT_SPIRV,
         .stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
-        .num_samplers = 1,
+        .num_samplers = 2,
         .num_storage_textures = 0,
         .num_storage_buffers = 0,
         .num_uniform_buffers = 0,
@@ -432,9 +433,6 @@ SDL_AppResult App::Init() {
 
     SDL_Log("Creating the GPU pipeline.. %f ms", start / 1000000.0);
     graphicsPipeline = SDL_CreateGPUGraphicsPipeline(m_gpuDevice.get(), &pipelineInfo);
-
-    err = SDL_GetError();
-    SDL_Log("SDL Error: %s", err);
 
     SDL_Log("Graphics pipeline created: %p", graphicsPipeline);
     lineGraphicsPipeline = SDL_CreateGPUGraphicsPipeline(m_gpuDevice.get(), &pipelineLineInfo);
@@ -675,134 +673,287 @@ SDL_AppResult App::OnQuit() const {
 }
 
 bool App::UploadDirtTexturesToGPU() {
-    std::string path = std::string(basePath) + "..\\" + pathToColourTexture;
-    SDL_Log("Creating and uploading GPU texture from %s", path.c_str());
-    SDL_IOStream *stream = SDL_IOFromFile(path.c_str(), "rb");
+    std::string colourTexturePath = std::string(basePath) + "..\\" + pathToColourTexture;
+    std::string normalTexturePath = std::string(basePath) + "..\\" + pathToNormalTexture;
 
-    if (stream == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s", path.c_str());
+    SDL_Log("Creating and uploading GPU texture from %s and %s", colourTexturePath.c_str(), normalTexturePath.c_str());
+    SDL_IOStream *colourTextureStream = SDL_IOFromFile(colourTexturePath.c_str(), "rb");
+    SDL_IOStream *normalTextureStream = SDL_IOFromFile(normalTexturePath.c_str(), "rb");
+
+    if (colourTextureStream == nullptr || normalTextureStream == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s or %s", colourTexturePath.c_str(), normalTexturePath.c_str());
         SDL_Log("Getting the base path again.");
-        auto newBasePath = const_cast<char *>(SDL_GetBasePath());
-        SDL_Log("Reaccquired base path: %s", newBasePath);
 
-        if (newBasePath == basePath) {
-            SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not reaccquire base path. Restart.");
-        }
-
+        //base path oftently breaks or has weird data idk why
+        // auto newBasePath = const_cast<char *>(SDL_GetBasePath());
+        // SDL_Log("Reaccquired base path: %s", newBasePath);
+        //
+        // if (newBasePath == basePath) {
+        //     SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not reaccquire base path. Restart.");
+        // }
+        //
         return false;
     }
 
-    SDL_Surface *surface = IMG_LoadJPG_IO(stream);
-    SDL_CloseIO(stream);
+    //Load surfaces of the files
+    SDL_Surface *colourSurface = IMG_LoadJPG_IO(colourTextureStream);
+    SDL_CloseIO(colourTextureStream);
 
-    if (surface == nullptr) {
+    SDL_Surface *normalSurface = IMG_LoadJPG_IO(normalTextureStream);
+    SDL_CloseIO(normalTextureStream);
+
+    if (colourSurface == nullptr || normalSurface == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "IMG_LoadJPG_IO failed: %s", SDL_GetError());
         return false;
     }
 
     //Convert surface's format as allegedly IMG_LoadJPG_IO may return surfaces with (random?) weird pixel formats
-    SDL_Surface *converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(surface);
+    SDL_Surface *convertedColourSurface = SDL_ConvertSurface(colourSurface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(colourSurface);
 
-    if (!converted) {
+    SDL_Surface *convertedNormalSurface = SDL_ConvertSurface(normalSurface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(normalSurface);
+
+    if (!convertedColourSurface) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_ConvertSurface failed");
+        SDL_DestroySurface(convertedColourSurface);
+        SDL_DestroySurface(convertedNormalSurface);
+
         return false;
     }
 
     // Create the GPU texture
-    SDL_GPUTextureCreateInfo texInfo = {};
-    texInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    texInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    texInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    texInfo.width = (Uint32) converted->w;
-    texInfo.height = (Uint32) converted->h;
-    texInfo.layer_count_or_depth = 1;
-    texInfo.num_levels = 1;
-    texInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+    SDL_GPUTextureCreateInfo colourTextureInfo = {};
+    colourTextureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    colourTextureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    colourTextureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    colourTextureInfo.width = (Uint32) convertedColourSurface->w;
+    colourTextureInfo.height = (Uint32) convertedColourSurface->h;
+    colourTextureInfo.layer_count_or_depth = 1;
+    colourTextureInfo.num_levels = 1;
+    colourTextureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
 
-    colourTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &texInfo);
-    if (colourTexture == nullptr) {
+    SDL_GPUTextureCreateInfo normalTextureInfo = {};
+    normalTextureInfo.type = SDL_GPU_TEXTURETYPE_2D;
+    normalTextureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    normalTextureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+    normalTextureInfo.width = (Uint32) convertedNormalSurface->w;
+    normalTextureInfo.height = (Uint32) convertedNormalSurface->h;
+    normalTextureInfo.layer_count_or_depth = 1;
+    normalTextureInfo.num_levels = 1;
+    normalTextureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
+
+    colourTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &colourTextureInfo);
+    normalTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &normalTextureInfo);
+
+    SDL_Log(
+        "normal=%ux%u colour=%ux%u",
+        normalTextureInfo.width,
+        normalTextureInfo.height,
+        colourTextureInfo.width,
+        colourTextureInfo.height
+    );
+
+    if (colourTexture == nullptr || normalTexture == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_CreateGPUTexture failed");
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
         return false;
     }
 
     // Transfer buffer
     const Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
-    const Uint32 totalSize = texInfo.height * texInfo.width * BytesPerPixel;
+    const Uint32 colourSizeInBytes = colourTextureInfo.height * colourTextureInfo.width * BytesPerPixel;
+    const Uint32 normalSizeInBytes = normalTextureInfo.height * normalTextureInfo.width * BytesPerPixel;
 
-    SDL_GPUTransferBufferCreateInfo transferInfo = {};
-    transferInfo.size = totalSize;
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    SDL_GPUTransferBufferCreateInfo colourTransferBufferInfo = {};
+    colourTransferBufferInfo.size = colourSizeInBytes;
+    colourTransferBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+    SDL_GPUTransferBufferCreateInfo normalTransferBufferInfo = {};
+    normalTransferBufferInfo.size = normalSizeInBytes;
+    normalTransferBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
 
-    SDL_GPUTransferBuffer *transfer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &transferInfo);
-    if (transfer == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Transfer buffer creation failed");
+    SDL_GPUTransferBuffer *colourTransferBuffer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &colourTransferBufferInfo);
+    SDL_GPUTransferBuffer *normalTransferBuffer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &normalTransferBufferInfo);
+
+    if (colourTransferBuffer == nullptr || normalTransferBuffer == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Transfer buffer creation failed: %s", SDL_GetError());
+
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
         return false;
     }
 
     //Map and copy row by row
-    Uint8 *mapped = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), transfer, false));
-    if (mapped == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_MapGPUTransferBuffer failed");
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transfer);
+    Uint8 *colourTransferMapped = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer, false));
+    Uint8 *normalTransferMapped = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer, false));
+
+    if (colourTransferMapped == nullptr || normalTransferMapped == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_MapGPUTransferBuffer failed: %s", SDL_GetError());
+
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
         return false;
     }
 
-    Uint8 *srcPixels;
-    srcPixels = static_cast<Uint8 *>(converted->pixels);
+    Uint8 *colourSourcePixels, *normalSourcePixels;
+    colourSourcePixels = static_cast<Uint8 *>(convertedColourSurface->pixels);
+    normalSourcePixels = static_cast<Uint8 *>(convertedNormalSurface->pixels);
 
-    SDL_Log("%i", totalSize);
-    SDL_Log("%i", sizeof(srcPixels));
+    const Uint32 normalBytesPerRow = normalTextureInfo.width * BytesPerPixel;
+    const Uint32 colourBytesPerRow = colourTextureInfo.width * BytesPerPixel;
 
-    SDL_memcpy(mapped, srcPixels, totalSize); //since no pitch
+    SDL_Log("2 * %i", colourSizeInBytes);
+    SDL_Log("%i", sizeof(colourSourcePixels));
+    SDL_Log("%i", sizeof(normalSourcePixels));
 
-    SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), transfer);
+    // SDL_memcpy(colourTransferMapped, colourSourcePixels, colourSizeInBytes); //since no pitch wait wtf it works?
+    // SDL_memcpy(normalTransferMapped, normalSourcePixels, normalSizeInBytes);
 
+    SDL_Log("A");
+    for (Uint32 y = 0; y < colourTextureInfo.height; ++y) {
+        SDL_memcpy(colourTransferMapped + (y * colourBytesPerRow),
+                   colourSourcePixels + (y * convertedColourSurface->pitch),
+                   normalBytesPerRow);
+    }
+    SDL_Log("B");
+    for (Uint32 y = 0; y < normalTextureInfo.height; ++y) {
+        SDL_memcpy(normalTransferMapped + (y * normalBytesPerRow),
+                   normalSourcePixels + (y * convertedNormalSurface->pitch),
+                   normalBytesPerRow);
+    }
+    SDL_Log("C");
+
+    SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+    SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+    SDL_Log("D");
     // Upload
     SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(m_gpuDevice.get());
-    if (!cmd) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Acquire command buffer failed");
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transfer);
+    SDL_Log("E");
+    if (cmd == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Acquire command buffer failed: %s", SDL_GetError());
+
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
         return false;
     }
 
-    SDL_GPUCopyPass *copy = SDL_BeginGPUCopyPass(cmd);
-    if (!copy) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Begin copy pass failed");
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transfer);
+    SDL_GPUCopyPass *colourCopyPass = SDL_BeginGPUCopyPass(cmd);
+    if (colourCopyPass == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Begin copy pass failed: %s", SDL_GetError());
+
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
         SDL_SubmitGPUCommandBuffer(cmd);
         return false;
     }
 
-    SDL_GPUTextureTransferInfo srcInfo = {};
-    srcInfo.transfer_buffer = transfer;
-    srcInfo.offset = 0;
-    srcInfo.pixels_per_row = texInfo.width;
-    srcInfo.rows_per_layer = texInfo.height;
+    SDL_Log("F");
+    SDL_GPUTextureTransferInfo colourSourceInfo = {};
+    colourSourceInfo.transfer_buffer = colourTransferBuffer;
+    colourSourceInfo.offset = 0;
+    colourSourceInfo.pixels_per_row = colourTextureInfo.width;
+    colourSourceInfo.rows_per_layer = colourTextureInfo.height;
 
-    SDL_GPUTextureRegion dstInfo = {};
-    dstInfo.texture = colourTexture;
-    dstInfo.layer = 0;
-    dstInfo.x = 0;
-    dstInfo.y = 0;
-    dstInfo.z = 0;
-    dstInfo.w = texInfo.width; //changing leads to fucking GPU corruptions
-    dstInfo.h = texInfo.height;
-    dstInfo.d = 1;
+    SDL_GPUTextureRegion colourDestinationInfo = {};
+    colourDestinationInfo.texture = colourTexture;
+    colourDestinationInfo.layer = 0;
+    colourDestinationInfo.x = 0;
+    colourDestinationInfo.y = 0;
+    colourDestinationInfo.z = 0;
+    colourDestinationInfo.w = colourTextureInfo.width;
+    colourDestinationInfo.h = colourTextureInfo.height;
+    colourDestinationInfo.d = 1;
 
-    SDL_UploadToGPUTexture(copy, &srcInfo, &dstInfo, false);
-    SDL_EndGPUCopyPass(copy);
-    SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transfer);
+    SDL_Log("G");
+    SDL_UploadToGPUTexture(colourCopyPass, &colourSourceInfo, &colourDestinationInfo, false);
+    SDL_EndGPUCopyPass(colourCopyPass);
+    SDL_Log("H");
 
-    if (!SDL_SubmitGPUCommandBuffer(cmd)) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Submit command buffer failed");
+    SDL_GPUCopyPass *normalCopyPass = SDL_BeginGPUCopyPass(cmd);
+    if (normalCopyPass == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Begin copy pass failed: %s", SDL_GetError());
+
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_SubmitGPUCommandBuffer(cmd);
         return false;
     }
+
+    SDL_Log("I");
+    SDL_GPUTextureTransferInfo normalSourceInfo = {};
+    normalSourceInfo.transfer_buffer = normalTransferBuffer;
+    normalSourceInfo.offset = 0;
+    normalSourceInfo.pixels_per_row = normalTextureInfo.width;
+    normalSourceInfo.rows_per_layer = normalTextureInfo.height;
+
+    SDL_GPUTextureRegion normalDestinationInfo = {};
+    normalDestinationInfo.texture = normalTexture;
+    normalDestinationInfo.layer = 0;
+    normalDestinationInfo.x = 0;
+    normalDestinationInfo.y = 0;
+    normalDestinationInfo.z = 0;
+    normalDestinationInfo.w = normalTextureInfo.width;
+    normalDestinationInfo.h = normalTextureInfo.height;
+    normalDestinationInfo.d = 1;
+
+    SDL_Log("J");
+    SDL_UploadToGPUTexture(normalCopyPass, &normalSourceInfo, &normalDestinationInfo, false);
+    SDL_EndGPUCopyPass(normalCopyPass);
+
+    SDL_Log("K");
+
+    if (!SDL_SubmitGPUCommandBuffer(cmd)) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Submit command buffer failed: %s", SDL_GetError());
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+        SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+        SDL_DestroySurface(convertedColourSurface);
+        SDL_DestroySurface(convertedNormalSurface);
+        return false;
+    }
+
+    SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
+    SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
+
+    SDL_DestroySurface(convertedColourSurface);
+    SDL_DestroySurface(convertedNormalSurface);
 
     //Create sampler for the texture
     SDL_GPUSamplerCreateInfo samplerInfo = {};
@@ -815,543 +966,16 @@ bool App::UploadDirtTexturesToGPU() {
     samplerInfo.max_lod = 1.0f;
 
     colourSampler = SDL_CreateGPUSampler(m_gpuDevice.get(), &samplerInfo);
+    normalSampler = SDL_CreateGPUSampler(m_gpuDevice.get(), &samplerInfo);
 
-    if (!colourSampler) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Sampler creation failed");
-        SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
+    if (colourSampler == nullptr || normalSampler == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Sampler creation failed: %s", SDL_GetError());
         return false;
     }
 
-    SDL_Log("Texture loaded successfully: %dx%d", texInfo.width, texInfo.height);
+    SDL_Log("Texture loaded successfully: %dx%d and %dx%d", colourTextureInfo.width, colourTextureInfo.height, normalTextureInfo.width, normalTextureInfo.height);
     return true;
 }
-
-/*
-bool App::UploadDirtTexturesToGPU() {
-    char *basePath = const_cast<char *>(SDL_GetBasePath());
-    if (!basePath) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Getting base path failed: %s", SDL_GetError());
-        return false;
-    }
-
-    std::string pathToColour = std::string(basePath) + pathToColourTexture;
-    SDL_free(basePath);
-
-    SDL_Log("Loading texture from: %s", pathToColour.c_str());
-
-    SDL_Surface *loadedColourSurface = IMG_Load(pathToColour.c_str());
-
-    if (!loadedColourSurface) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to load colour texture %s: %s", pathToColour.c_str(), SDL_GetError());
-        return false;
-    }
-
-    SDL_Log("Loaded surface: colour(%dx%d)", loadedColourSurface->w, loadedColourSurface->h);
-
-    SDL_Surface *colourRGBASurface = SDL_ConvertSurface(loadedColourSurface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(loadedColourSurface);
-
-    if (!colourRGBASurface) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to convert colour texture to RGBA32: %s", SDL_GetError());
-        return false;
-    }
-
-    SDL_GPUTextureCreateInfo colourTextureInfo{};
-    colourTextureInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    colourTextureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    colourTextureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    colourTextureInfo.width = colourRGBASurface->w;
-    colourTextureInfo.height = colourRGBASurface->h;
-    colourTextureInfo.layer_count_or_depth = 1;
-    colourTextureInfo.num_levels = 1;
-    colourTextureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
-
-    colourTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &colourTextureInfo);
-
-    if (!colourTexture) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create colour GPU texture: %s", SDL_GetError());
-        SDL_DestroySurface(colourRGBASurface);
-        return false;
-    }
-
-    SDL_GPUTransferBufferCreateInfo transferInfo{};
-    transferInfo.size = colourRGBASurface->w * colourRGBASurface->h * 4;
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-
-    SDL_GPUTransferBuffer *transferBuffer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &transferInfo);
-    if (!transferBuffer) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create transfer buffer: %s", SDL_GetError());
-        SDL_DestroySurface(colourRGBASurface);
-        return false;
-    }
-
-    Uint8 *mappedData = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), transferBuffer, false));
-    const Uint8 *srcPixels = static_cast<const Uint8 *>(colourRGBASurface->pixels);
-
-    for (int row = 0; row < colourRGBASurface->h; row++) {
-        SDL_memcpy(mappedData + row * colourRGBASurface->w * 4, srcPixels + row * colourRGBASurface->pitch, colourRGBASurface->w * 4);
-    }
-
-    SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-    SDL_DestroySurface(colourRGBASurface);
-
-    SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_gpuDevice.get());
-    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
-
-    SDL_GPUTextureTransferInfo textureSourceInfo{
-        .transfer_buffer = transferBuffer,
-        .offset = 0,
-        .pixels_per_row = static_cast<Uint32>(colourTextureInfo.width),
-        .rows_per_layer = static_cast<Uint32>(colourTextureInfo.height)
-    };
-
-    SDL_GPUTextureRegion textureDestinationInfo{
-        .texture = colourTexture,
-        .w = static_cast<Uint32>(colourTextureInfo.width),
-        .h = static_cast<Uint32>(colourTextureInfo.height),
-        .d = 1
-    };
-
-    SDL_UploadToGPUTexture(copyPass, &textureSourceInfo, &textureDestinationInfo, false);
-    SDL_EndGPUCopyPass(copyPass);
-
-    SDL_GPUFence *uploadFence = SDL_SubmitGPUCommandBufferAndAcquireFence(commandBuffer);
-    if (uploadFence) {
-        SDL_WaitForGPUFences(m_gpuDevice.get(), true, &uploadFence, 1);
-        SDL_ReleaseGPUFence(m_gpuDevice.get(), uploadFence);
-    }
-
-    SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-
-    SDL_GPUSamplerCreateInfo samplerInfo = {
-        .min_filter = SDL_GPU_FILTER_LINEAR,
-        .mag_filter = SDL_GPU_FILTER_LINEAR,
-        .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_LINEAR,
-        .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        .address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        .mip_lod_bias = 0.0f,
-        .max_anisotropy = 1.0f,
-        .compare_op = SDL_GPU_COMPAREOP_ALWAYS,
-        .min_lod = 0.0f,
-        .max_lod = 0.0f,
-        .enable_anisotropy = false,
-        .enable_compare = false,
-    };
-
-    colourSampler = SDL_CreateGPUSampler(m_gpuDevice.get(), &samplerInfo);
-    if (!colourSampler) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create colour sampler: %s", SDL_GetError());
-        return false;
-    }
-
-    return true;
-}
-
-bool App::UploadDirtTexturestoGPU() {
-    //Load surfaces
-    SDL_Log("Starting UploadDirtTexturestoGPU");
-
-    char *basePath = const_cast<char *>(SDL_GetBasePath());
-    if (!basePath) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Getting base path failed: %s", SDL_GetError());
-        return false;
-    } else {
-        //std::cout << "Base path is = " << basePath << std::endl;
-    }
-
-    std::string overriteBasePath = "C:\\Users\\szymo\\CLionProjects\\SDL1\\";
-    std::string pathToColour = std::string(overriteBasePath) + pathToColourTexture;
-
-    SDL_Log("Path to colour is: %s", pathToColour.c_str());
-
-    SDL_free(basePath);
-    SDL_IOStream *iostream = SDL_IOFromFile(pathToColour.c_str(), "rb");
-
-    if (iostream == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not open file %s: %s", pathToColour.c_str(), SDL_GetError());
-        return false;
-    }
-
-    SDL_Surface *surface = IMG_LoadJPG_IO(iostream);
-    SDL_CloseIO(iostream);
-
-    if (surface == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Surface is null %s", SDL_GetError());
-        return false;
-    }
-
-    SDL_Surface *convertedSurface = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(surface);
-
-    if (convertedSurface == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Converted surface resulted in nullptr:  %s", SDL_GetError());
-        return false;
-    }
-
-    //Create the GPU texture
-    SDL_GPUTextureCreateInfo textureInfo{
-        .type = SDL_GPU_TEXTURETYPE_2D,
-        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-        .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
-        .width = static_cast<Uint32>(convertedSurface->w),
-        .height = static_cast<Uint32>(convertedSurface->h),
-        .layer_count_or_depth = 1,
-        .num_levels = 1,
-        .sample_count = SDL_GPU_SAMPLECOUNT_1,
-        .props = 0
-    };
-    SDL_GPUTexture *gpuTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &textureInfo);
-    colourTexture = gpuTexture;
-
-    auto bytesPerPixel = 4; //32 bits from red, green, blue, alpha 8 each = 4 bytes
-
-    //Create a transfer buffer and copy surfaces data into it
-    SDL_GPUTransferBufferCreateInfo transferInfo{};
-    transferInfo.size = bytesPerPixel * convertedSurface->w * convertedSurface->h;
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-
-    SDL_Log("Transfer info size is composed of %d, %d, %d", convertedSurface->w, convertedSurface->h, transferInfo.size);
-
-    SDL_GPUTransferBuffer *transferBuffer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &transferInfo);
-
-    //Cast to Uint8 in order to be able to shift later on (pitch)
-    auto mappedData = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), transferBuffer, false));
-    const Uint8 *srcPixels = static_cast<const Uint8 *>(convertedSurface->pixels);
-
-    //Account for pitch. The GPU expects tightly packed rows with no padding.
-    for (int row = 0; row < convertedSurface->h; row++) {
-        Uint8 *dst = mappedData + row * textureInfo.width * bytesPerPixel;
-        const Uint8 *src = srcPixels + row * convertedSurface->pitch;
-
-        //SDL_memcpy is just a macro for memcpy, for some reason
-        memcpy(dst, src, bytesPerPixel * textureInfo.width);
-        // SDL_memcpy(dst, src, bytesPerPixel * textureInfo.width);
-    }
-
-    SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-    SDL_DestroySurface(convertedSurface);
-
-    //Accquire command buffer and do a copy pass
-    SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_gpuDevice.get());
-    if (commandBuffer == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Command buffer is null:  %s", SDL_GetError());
-        return false;
-    }
-
-    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
-    if (copyPass == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Copy pass is null:  %s", SDL_GetError());
-        return false;
-    }
-
-    //Set up source / dest
-    SDL_GPUTextureTransferInfo textureSourceInfo{
-        .transfer_buffer = transferBuffer,
-        .offset = 0,
-        .pixels_per_row = textureInfo.width,
-        .rows_per_layer = textureInfo.height
-    };
-
-    SDL_GPUTextureRegion textureDestinationInfo{
-        .texture = colourTexture,
-        .layer = 0,
-        .x = 0,
-        .y = 0,
-        .z = 0,
-        .w = textureInfo.width,
-        .h = textureInfo.height,
-        .d = 1
-    };
-
-    //Upload data to GPU texture
-    SDL_UploadToGPUTexture(copyPass, &textureSourceInfo, &textureDestinationInfo, false);
-
-    //End copy pass, submit command buffer and release transfer buffer
-    SDL_EndGPUCopyPass(copyPass);
-    SDL_SubmitGPUCommandBuffer(commandBuffer);
-    SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-
-    //Creatre samplers for the textures
-    SDL_GPUSamplerCreateInfo samplerInfo = {
-        .min_filter = SDL_GPU_FILTER_LINEAR,
-        .mag_filter = SDL_GPU_FILTER_LINEAR,
-        .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST, // No mipmaps, so this is fine
-        .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        .address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT,
-        .mip_lod_bias = 0.0f,
-        .max_anisotropy = 1.0f,
-        .compare_op = SDL_GPU_COMPAREOP_ALWAYS,
-        .min_lod = 0.0f,
-        .max_lod = 1.0f,
-        .enable_anisotropy = false,
-        .enable_compare = false,
-        .padding1 = 0,
-        .padding2 = 0,
-        .props = 0
-    };
-
-    colourSampler = SDL_CreateGPUSampler(m_gpuDevice.get(), &samplerInfo);
-    if (!colourSampler) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create colour sampler: %s", SDL_GetError());
-        return false;
-    }
-
-    return true;
-}
-
-bool App::UploadDirtTexturesToGPU() {
-    char *basePath = const_cast<char *>(SDL_GetBasePath());
-    if (!basePath) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Getting base path failed: %s", SDL_GetError());
-        return false;
-    }
-
-    std::string pathToNormal = std::string(basePath) + pathToNormalTexture;
-    std::string pathToColour = std::string(basePath) + pathToColourTexture;
-
-    SDL_free(basePath);
-
-    SDL_Log("Loading textures from: %s and %s", pathToNormal.c_str(), pathToColour.c_str());
-    fflush(stdout);
-
-    SDL_IOStream *normalSurfaceStream = SDL_IOFromFile(pathToNormal.c_str(), "rb");
-    SDL_IOStream *colourSurfaceStream = SDL_IOFromFile(pathToColour.c_str(), "rb");
-
-    if (!normalSurfaceStream || !colourSurfaceStream) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to open texture files: %s", SDL_GetError());
-        return false;
-    }
-
-    SDL_Surface *loadedNormalSurface = IMG_LoadJPG_IO(normalSurfaceStream);
-    SDL_Surface *loadedColourSurface = IMG_LoadJPG_IO(colourSurfaceStream);
-
-    SDL_CloseIO(normalSurfaceStream);
-    SDL_CloseIO(colourSurfaceStream);
-
-    if (!loadedNormalSurface || !loadedColourSurface) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to load normal/colour texture: %s", SDL_GetError());
-        return false;
-    }
-
-    SDL_Log("Loaded surfaces: normal(%dx%d), colour(%dx%d)", loadedNormalSurface->w, loadedNormalSurface->h, loadedColourSurface->w, loadedColourSurface->h);
-
-    SDL_Surface *normalRGBASurface = SDL_ConvertSurface(loadedNormalSurface, SDL_PIXELFORMAT_RGBA32);
-    SDL_Surface *colourRGBASurface = SDL_ConvertSurface(loadedColourSurface, SDL_PIXELFORMAT_RGBA32);
-
-    SDL_DestroySurface(loadedNormalSurface);
-    SDL_DestroySurface(loadedColourSurface);
-
-    if (!normalRGBASurface || !colourRGBASurface) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to convert normal/co texture to RGBA32: %s", SDL_GetError());
-        return false;
-    }
-    SDL_GPUTextureCreateInfo normalTextureInfo{};
-    normalTextureInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    normalTextureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    normalTextureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    normalTextureInfo.width = normalRGBASurface->w;
-    normalTextureInfo.height = normalRGBASurface->h;
-    normalTextureInfo.layer_count_or_depth = 1;
-    normalTextureInfo.num_levels = 1;
-    normalTextureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
-
-    SDL_GPUTextureCreateInfo colourTextureInfo{};
-    colourTextureInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    colourTextureInfo.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-    colourTextureInfo.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
-    colourTextureInfo.width = colourRGBASurface->w;
-    colourTextureInfo.height = colourRGBASurface->h;
-    colourTextureInfo.layer_count_or_depth = 1;
-    colourTextureInfo.num_levels = 1;
-    colourTextureInfo.sample_count = SDL_GPU_SAMPLECOUNT_1;
-
-    normalTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &normalTextureInfo);
-    colourTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &colourTextureInfo);
-
-    if (!normalTexture || !colourTexture) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create normal/colour GPU texture: %s", SDL_GetError());
-        SDL_DestroySurface(normalRGBASurface);
-        SDL_DestroySurface(colourRGBASurface);
-        return false;
-    }
-
-    const Uint32 normalBytesPerPixel = 4; //8 red, 8 blue, 8 green, 8 alpha per pixel = 4 * 8 = 32 bits = 4 bytes since size is in bytes
-    const Uint32 colourBytesPerPixel = 4; //same as above
-
-    const Uint32 normalUploadSize = normalTextureInfo.width * normalTextureInfo.height * normalBytesPerPixel;
-    const Uint32 colourUploadSize = colourTextureInfo.width * colourTextureInfo.height * colourBytesPerPixel;
-
-    SDL_GPUTransferBufferCreateInfo transferInfo{};
-    transferInfo.size = normalUploadSize + colourUploadSize;
-    transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-    SDL_GPUTransferBuffer *transferBuffer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &transferInfo);
-
-    if (!transferBuffer) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create normal/colour texture transfer buffer: %s", SDL_GetError());
-        SDL_DestroySurface(normalRGBASurface);
-        SDL_DestroySurface(colourRGBASurface);
-        return false;
-    }
-
-    if (SDL_MUSTLOCK(colourRGBASurface) && !SDL_LockSurface(colourRGBASurface)) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to lock colour texture surface: %s", SDL_GetError());
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-        SDL_DestroySurface(normalRGBASurface);
-        SDL_DestroySurface(colourRGBASurface);
-        return false;
-    }
-    if (SDL_MUSTLOCK(normalRGBASurface) && !SDL_LockSurface(normalRGBASurface)) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to lock normal texture surface: %s", SDL_GetError());
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-        SDL_DestroySurface(normalRGBASurface);
-        SDL_DestroySurface(colourRGBASurface);
-        return false;
-    }
-
-    auto *mappedData = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), transferBuffer, false));
-    if (!mappedData) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to map normal/colour texture transfer buffer: %s", SDL_GetError());
-
-        if (SDL_MUSTLOCK(normalRGBASurface)) {
-            SDL_UnlockSurface(normalRGBASurface);
-        }
-
-        if (SDL_MUSTLOCK(colourRGBASurface)) {
-            SDL_UnlockSurface(colourRGBASurface);
-        }
-
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-        SDL_DestroySurface(normalRGBASurface);
-        SDL_DestroySurface(colourRGBASurface);
-        return false;
-    }
-
-    const auto *sourceNormalPixels = static_cast<const Uint8 *>(normalRGBASurface->pixels);
-    const auto *sourceColourPixels = static_cast<const Uint8 *>(colourRGBASurface->pixels);
-
-    // Ttransfer buffer expects rows with no padding, so we need to memcpy each row individually
-    const Uint32 normalBytesPerRow = normalTextureInfo.width * normalBytesPerPixel;
-    const Uint32 colourBytesPerRow = colourTextureInfo.width * colourBytesPerPixel;
-
-    //Offset for memcpy is 0
-    for (Uint32 y = 0; y < normalTextureInfo.height; ++y) {
-        SDL_memcpy(mappedData + (y * normalBytesPerRow),
-                   sourceNormalPixels + (y * normalRGBASurface->pitch),
-                   normalBytesPerRow);
-    }
-
-    //Offset for memcpy is normalDataSize MUST be in bytes
-    Uint32 normalDataSize = normalTextureInfo.height * normalBytesPerRow;
-
-    for (Uint32 y = 0; y < colourTextureInfo.height; ++y) {
-        SDL_memcpy(mappedData + normalDataSize + (y * colourBytesPerRow),
-                   sourceColourPixels + (y * colourRGBASurface->pitch),
-                   colourBytesPerRow);
-    }
-
-    SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-
-    if (SDL_MUSTLOCK(normalRGBASurface)) {
-        SDL_UnlockSurface(normalRGBASurface);
-    }
-    if (SDL_MUSTLOCK(colourRGBASurface)) {
-        SDL_UnlockSurface(colourRGBASurface);
-    }
-
-    SDL_DestroySurface(normalRGBASurface);
-    SDL_DestroySurface(colourRGBASurface);
-
-    SDL_GPUCommandBuffer *cmdBuf = SDL_AcquireGPUCommandBuffer(m_gpuDevice.get());
-    if (!cmdBuf) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to acquire command buffer for normal texture upload: %s", SDL_GetError());
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-        return false;
-    }
-
-    SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(cmdBuf);
-    if (!copyPass) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to begin normal texture copy pass: %s", SDL_GetError());
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-        SDL_SubmitGPUCommandBuffer(cmdBuf);
-        return false;
-    }
-
-    SDL_GPUTextureTransferInfo normalSource{};
-    normalSource.transfer_buffer = transferBuffer;
-    normalSource.offset = 0;
-    normalSource.pixels_per_row = normalTextureInfo.width;
-    normalSource.rows_per_layer = normalTextureInfo.height;
-
-    SDL_GPUTextureTransferInfo colourSource{};
-    colourSource.transfer_buffer = transferBuffer;
-    colourSource.offset = normalDataSize; //mentioned in the SDL_memcpy's
-    colourSource.pixels_per_row = colourTextureInfo.width;
-    colourSource.rows_per_layer = colourTextureInfo.height;
-
-    SDL_GPUTextureRegion normalDestination{};
-    normalDestination.texture = normalTexture;
-    normalDestination.mip_level = 0;
-    normalDestination.layer = 0;
-    normalDestination.x = 0;
-    normalDestination.y = 0;
-    normalDestination.z = 0;
-    normalDestination.w = normalTextureInfo.width;
-    normalDestination.h = normalTextureInfo.height;
-    normalDestination.d = 1;
-
-    SDL_GPUTextureRegion colourDestination{};
-    colourDestination.texture = colourTexture;
-    colourDestination.mip_level = 0;
-    colourDestination.layer = 0;
-    colourDestination.x = 0;
-    colourDestination.y = 0;
-    colourDestination.z = 0;
-    colourDestination.w = colourTextureInfo.width;
-    colourDestination.h = colourTextureInfo.height;
-    colourDestination.d = 1;
-
-    SDL_UploadToGPUTexture(copyPass, &normalSource, &normalDestination, false);
-    SDL_UploadToGPUTexture(copyPass, &colourSource, &colourDestination, false);
-
-    SDL_EndGPUCopyPass(copyPass);
-    SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), transferBuffer);
-
-    if (!SDL_SubmitGPUCommandBuffer(cmdBuf)) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to submit normal texture upload: %s", SDL_GetError());
-        return false;
-    }
-
-    SDL_GPUSamplerCreateInfo normalSamplerInfo{};
-    normalSamplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
-    normalSamplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
-    normalSamplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    normalSamplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    normalSamplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    normalSamplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-    normalSamplerInfo.max_lod = 1000.f;
-
-    SDL_GPUSamplerCreateInfo colourSamplerInfo{};
-    colourSamplerInfo.min_filter = SDL_GPU_FILTER_LINEAR;
-    colourSamplerInfo.mag_filter = SDL_GPU_FILTER_LINEAR;
-    colourSamplerInfo.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    colourSamplerInfo.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    colourSamplerInfo.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_REPEAT;
-    colourSamplerInfo.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-    colourSamplerInfo.max_lod = 1000.f;
-
-    normalSampler = SDL_CreateGPUSampler(m_gpuDevice.get(), &normalSamplerInfo);
-    colourSampler = SDL_CreateGPUSampler(m_gpuDevice.get(), &colourSamplerInfo);
-
-    if (!normalSampler || !colourSampler) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create normal texture sampler: %s", SDL_GetError());
-        return false;
-    }
-
-    return true;
-}
-*/
 
 SDL_AppResult App::OnUpdate() {
     deltaTimeMS = SDL_GetTicks() - currentMillisecondsSinceStart;
@@ -1665,7 +1289,7 @@ SDL_AppResult App::OnRender() {
             {normalTexture, normalSampler},
         };
 
-        SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 1);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 2);
 
         SDL_DrawGPUPrimitives(renderPass, totalVertexNumber, 1, 0, 0);
 
