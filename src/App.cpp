@@ -47,16 +47,16 @@ static constexpr float aspectRatio = screenWidth / screenHeight;
 
 static constexpr float kMouseLookSensitivity = 0.2f;
 static constexpr float kMoveSpeed = 0.15f;
-static constexpr float kJumpForceMagnitude = 3;
+static constexpr float kJumpForceMagnitude = 3.f;
 static constexpr float kBlockHalfExtent = 0.5f;
 static constexpr float kCameraHeightAboveGround = 1.5f;
-static constexpr float kGravityMultiplier = 0.75f;
+static constexpr float kGravityMultiplier = 1;
 
-static std::string pathToNormalTexture = "src\\img\\dirtNormal.jpg";
+static std::string pathToNormalTexture = "src\\img\\dirtNormal.jpg"; //To be replaced with some sort of TextureManager
 static std::string pathToColourTexture = "src\\img\\dirt2c.jpg";
+//also maybe the textures should be cached?
 
-// Vector startingCameraPos = Vector(0.f, 5.f, 10.f);
-Vector startingCameraPos = Vector(0.f, 0.f, 3.f); // close to origin
+Vector startingCameraPos = Vector(0.f, 2.f, -3.f);
 Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
 Camera *sceneCamera = nullptr;
 
@@ -133,7 +133,6 @@ namespace {
         }
 
         if (sceneCamera->GetMoveState(Camera::Down)) {
-            //MoveCameraLocal(Vector(0.f, -1.f, 0.f), kMoveSpeed);
             MoveCameraWithForce(App::GetGravityVector().Normalized(), kJumpForceMagnitude);
         }
     }
@@ -251,6 +250,9 @@ SDL_AppResult App::Init() {
     if (!vertexShader) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create vertex shader: %s", SDL_GetError());
     }
+    const char *err = SDL_GetError();
+    SDL_Log("SDL Error: %s", err);
+
     SDL_Log("Vertex shader created: %p", vertexShader);
     fflush(stdout);
     SDL_free(vertexShaderCode);
@@ -352,6 +354,9 @@ SDL_AppResult App::Init() {
     pipelineInfo.vertex_input_state.num_vertex_attributes = sizeof(vertexAttributes) / sizeof(SDL_GPUVertexAttribute); //2: position, color
     pipelineInfo.vertex_input_state.vertex_attributes = vertexAttributes;
 
+    //Culling modes (for now None)
+    pipelineInfo.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+
     //Describe the color target
     SDL_GPUColorTargetDescription colorTargetDescriptions{};
     colorTargetDescriptions.blend_state.enable_blend = true;
@@ -427,6 +432,10 @@ SDL_AppResult App::Init() {
 
     SDL_Log("Creating the GPU pipeline.. %f ms", start / 1000000.0);
     graphicsPipeline = SDL_CreateGPUGraphicsPipeline(m_gpuDevice.get(), &pipelineInfo);
+
+    err = SDL_GetError();
+    SDL_Log("SDL Error: %s", err);
+
     SDL_Log("Graphics pipeline created: %p", graphicsPipeline);
     lineGraphicsPipeline = SDL_CreateGPUGraphicsPipeline(m_gpuDevice.get(), &pipelineLineInfo);
     SDL_Log("Line graphics pipeline created: %p", lineGraphicsPipeline);
@@ -495,8 +504,7 @@ SDL_AppResult App::Init() {
     ConstructChunkAt(Vector(0, 0, -16));
     ConstructChunkAt(Vector(16, 0, 0));
     ConstructChunkAt(Vector(-16, 0, 0));
-    ConstructChunkAt(Vector(-16, 0, -16));
-
+    //ConstructChunkAt(Vector(-16, 0, -16));
     //ConstructChunkAt(Vector(-16, 0, 16));
     //ConstructChunkAt(Vector(16, 0, -16));
     //ConstructChunkAt(Vector(16, 0, 16));
@@ -673,6 +681,14 @@ bool App::UploadDirtTexturesToGPU() {
 
     if (stream == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s", path.c_str());
+        SDL_Log("Getting the base path again.");
+        auto newBasePath = const_cast<char *>(SDL_GetBasePath());
+        SDL_Log("Reaccquired base path: %s", newBasePath);
+
+        if (newBasePath == basePath) {
+            SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not reaccquire base path. Restart.");
+        }
+
         return false;
     }
 
@@ -1343,12 +1359,18 @@ SDL_AppResult App::OnUpdate() {
 
     sceneCamera->MoveCameraBasedOnVelocity();
 
+    if (sceneCamera->Position.y >= 0) {
+        sceneCamera->AddForceThisTick((GetGravityVector() * deltaTimeMS / 1000 * kGravityMultiplier));
+    } else {
+        // SDL_Log("%f", sceneCamera->Position.y);
+        sceneCamera->ResetVelocityAlongWorldAxis(Vector(0, 1, 0));
+        //sceneCamera->Position.y = 0 + kCameraHeightAboveGround;
+    }
+
     auto hit = RaycastRay(sceneCamera->Position, GetGravityVector().Normalized(), kCameraHeightAboveGround);
     if (hit.hit) {
-        sceneCamera->ResetVelocityAlongAxis(GetGravityVector().Normalized());
+        sceneCamera->ResetVelocityAlongWorldAxis(GetGravityVector().Normalized());
         sceneCamera->Position.y = hit.blockPosition.y + kBlockHalfExtent + kCameraHeightAboveGround;
-    } else {
-        sceneCamera->AddForceThisTick(((GetGravityVector() * deltaTimeMS) / 1000) / 2);
     }
 
     return CONTINUE;
@@ -1420,7 +1442,6 @@ RaycastHit App::CheckIsPointInsideAny(Vector point) const {
     return {};
 }
 
-
 RaycastHit App::RaycastRay(Vector pos, Vector normDir, float maxDistance) const {
     static float constexpr stepSize = 0.1f;
     const int maxIterations = static_cast<int>(std::ceil(maxDistance / stepSize));
@@ -1445,7 +1466,7 @@ RaycastHit App::RaycastRay(Vector pos, Vector normDir, float maxDistance) const 
 }
 
 Vector App::GetGravityVector() {
-    return Vector(0, -1, 0) * 9.81f * kGravityMultiplier;
+    return Vector(0, -1, 0) * 9.81f;
 }
 
 SDL_AppResult App::OnRender() {
@@ -1459,19 +1480,30 @@ SDL_AppResult App::OnRender() {
     Matrix4D viewMatrix = camera.GetViewMatrix();
     Matrix4D projectionMatrix = camera.GetProjectionMatrix();
 
-    // float pM[16];
-    // projectionMatrix.toOutFloat16Array(pM);
+    // auto view = Matrix4D(
+    //     1, 0, 0, 0,
+    //     0, 1, 0, -2,
+    //     0, 0, -1, -3,
+    //     0, 0, 0, 1
+    // );
     //
-    // SDL_Log("PM");
-    // for (int i = 0; i < 16; i += 1) {
-    //     SDL_Log("%f", pM[i]);
-    // }
+    // auto proj = Matrix4D(
+    //     0.67, 0, 0, 0,
+    //     0, 1.19, 0, 0,
+    //     0, 0, -1.001, -0.1001,
+    //     0, 0, -1, 0
+    // );
 
     float float16Array[16];
-    Matrix4D viewProjection = projectionMatrix * viewMatrix; //projectionMatrix * viewMatrix;
+    Matrix4D viewProjection = projectionMatrix * viewMatrix;
     viewProjection.toOutFloat16Array(float16Array);
 
-    // SDL_PushGPUVertexUniformData(commandBuffer, 0, float16Array, sizeof(float16Array));
+    SDL_PushGPUVertexUniformData(
+        commandBuffer,
+        0,
+        float16Array,
+        sizeof(float16Array)
+    );
 
     auto getDrawVertexCount = [](Mesh *mesh) {
         return mesh->numTriangles > 0 ? mesh->numTriangles * 3 : mesh->numVerticies;
@@ -1548,7 +1580,7 @@ SDL_AppResult App::OnRender() {
         transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
         SDL_GPUTransferBuffer *frameTransferBuffer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &transferInfo);
         if (!frameTransferBuffer) {
-            SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create transfer buffer: %s", SDL_GetError());
+            SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create scene's vertex transfer buffer: %s", SDL_GetError());
             SDL_SubmitGPUCommandBuffer(commandBuffer);
             return FAILURE;
         }
@@ -1616,10 +1648,8 @@ SDL_AppResult App::OnRender() {
         return FAILURE;
     }
 
-    SDL_GPUViewport viewport = {0, 0, (float) screenWidth, (float) screenHeight, 0.0f, 1.0f};
-    SDL_SetGPUViewport(renderPass, &viewport);
-
-    SDL_PushGPUVertexUniformData(commandBuffer, 0, float16Array, sizeof(float16Array));
+    // SDL_GPUViewport viewport = {0, 0, (float) screenWidth, (float) screenHeight, 0.0f, 1.0f};
+    // SDL_SetGPUViewport(renderPass, &viewport);
 
     SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
 
@@ -1629,10 +1659,10 @@ SDL_AppResult App::OnRender() {
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
 
         // SDL_Log("colourTexture = %p, colourSa
-        SDL_GPUTextureSamplerBinding bindings[1] =
+        SDL_GPUTextureSamplerBinding bindings[2] =
         {
             {colourTexture, colourSampler},
-            //{normalTexture, normalSampler},
+            {normalTexture, normalSampler},
         };
 
         SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 1);

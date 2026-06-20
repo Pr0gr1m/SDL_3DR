@@ -9,13 +9,12 @@
 
 class Camera {
 public:
-    Camera() = default;
+    Camera() {
+        UpdateDirectionVectors();
+    }
 
     Vector Position = Vector(0, 0, 0);
-    // Vector Rotation;
-    float pitch, yaw, roll;
-    float yawRad;
-    float pitchRad;
+    float pitch{}, yaw{}, roll{};
 
     Vector worldUp = Vector(0, 1, 0);
     Vector forward;
@@ -100,15 +99,15 @@ public:
     }
 
     void UpdateDirectionVectors() {
-        yawRad = yaw * DEG_2_RAD;
-        pitchRad = pitch * DEG_2_RAD;
+        float yawRad = yaw * DEG_2_RAD;
+        float pitchRad = pitch * DEG_2_RAD;
 
         forward = Vector(cos(pitchRad) * sin(yawRad), sin(pitchRad), -cos(pitchRad) * cos(yawRad)).Normalized();
         right = forward.Cross(worldUp).Normalized();
         up = right.Cross(forward).Normalized();
     }
 
-    void ResetVelocityAlongAxis(Vector);
+    void ResetVelocityAlongWorldAxis(Vector);
 };
 
 

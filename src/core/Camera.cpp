@@ -26,6 +26,6 @@ void Camera::MoveCameraBasedOnVelocity() {
 //     this->Position += cameraVelocity;
 // }
 
-void Camera::ResetVelocityAlongAxis(Vector axis) {
+void Camera::ResetVelocityAlongWorldAxis(Vector axis) {
     this->cameraVelocity *= Vector(axis.x > 0 ? 0 : 1, axis.y > 0 ? 0 : 1, axis.z > 0 ? 0 : 1);
 }

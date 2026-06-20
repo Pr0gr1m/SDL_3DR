@@ -103,7 +103,7 @@ private:
 
     char *basePath;
 
-    Uint64 deltaTimeMS = 0;
+    Uint64 deltaTimeMS = 0; //KEEP IN MIND - NEED TO DIVIDE BY 1000 TO GET SECONDS
     Uint64 currentMillisecondsSinceStart;
 
     std::unique_ptr<Simulation> simulation;
