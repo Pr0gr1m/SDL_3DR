@@ -38,9 +38,6 @@
 //16x16x16 chunk for each vertex buffer?
 //and only chunks within range are loaded, at runtime and stored in RAM?
 
-// static constexpr int chunkSizeXYZ = 16; //starting from 0,0,0 it goes to -8,-8,-8 and to 8,8,8
-// static constexpr Uint32 chunkVertexBufferSize = chunkSizeXYZ * chunkSizeXYZ * chunkSizeXYZ * sizeof(Vertex3D); //not optimized, as there will ALWAYS be less verticies with f. culling, greedy meshing etc
-
 static constexpr float screenWidth = 1600;
 static constexpr float screenHeight = 900;
 static constexpr float aspectRatio = screenWidth / screenHeight;
@@ -62,10 +59,10 @@ Camera *sceneCamera = nullptr;
 
 SimplexNoise *noise;
 
-//TODO: Replace fixed size of numObjectsInScene, maybe predict with gen. algorythm number of naturally gen. blocks and have a vector/map of player placed objects? / Or a very big array
-//TODO: Also replace Simulation class as its unecessary since I could just refactor everything into Object.h class? (ignoring that definitions are there whatever)
 //TODO: Before full release, change CMakeList.txt to put built shaders in build dir, im not sure how building app works but its better that way
 //TODO: Replace built in paths with some texture manager
+//TODO: Improve RaycastRay accuracy / reliability
+//TODO: Optimize with cullings
 
 namespace {
     Camera BuildCameraFromState() {
@@ -456,51 +453,17 @@ SDL_AppResult App::Init() {
     if (!UploadDirtTexturesToGPU()) {
         return FAILURE;
     }
+
     SDL_WaitForGPUIdle(m_gpuDevice.get());
-
-    //SDL_Log("Initalizing custom components.. %f ms", start / 1000000.0);
-    /*
-    //for some reason x is y and y is x
-    // static Vector cubeVerticies[] =
-    // {
-    //     {0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, 0.5f}, {-0.5f, 0.5f, -0.5f}, {0.5f, 0.5f, -0.5f},
-    //     {0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, 0.5f}, {-0.5f, -0.5f, -0.5f}, {0.5f, -0.5f, -0.5f}
-    // };
-
-    static Int3 cubeTriangles[] = {
-        // Top
-        {0, 1, 2}, {0, 2, 3},
-        // Front
-        {0, 5, 1}, {0, 4, 5},
-        // Right
-        {0, 3, 7}, {0, 7, 4},
-        // Back
-        {3, 2, 6}, {3, 6, 7},
-        // Left
-        {1, 5, 6}, {1, 6, 2},
-        // Bottom
-        {4, 7, 6}, {4, 6, 5}
-    };
-
-    Mesh cubeMesh(cubeVerticies, std::size(cubeVerticies), cubeTriangles, std::size(cubeTriangles));
-
-    // Vector rot(0, 0, 0);
-    // Vector rotRadians(rot.x / 6.28f, rot.y / 6.28f, rot.z / 6.28f); //0.785375
-    std::vector<Int3> objects;
-    for (int x = -10; x < 10; x++) {
-        for (int z = -10; z < 10; z++) {
-            // Object cubeObject(cubeMesh, Vector(0, 0, 0), Vector(0, 0, 0));
-            // simulation->RegisterObjectInScene(cubeObject);
-            objects.push_back(Int3(x, 0, z));
-        }
-    }
-    */
 
     BuildCameraFromState();
     currentMillisecondsSinceStart = SDL_GetTicks();
 
     cubeMesh = new Mesh(cubeVerticies, std::size(cubeVerticies), cubeTriangles, std::size(cubeTriangles));
-    simulation = std::make_unique<Simulation>(chunkSizeXYZ * chunkSizeXYZ * chunkSizeXYZ);
+
+    SDL_Log("Creating simulation.");
+    // simulation = std::make_unique<Simulation>();
+    chunkManager = new ChunkManager();
 
     noise = new SimplexNoise(0.15f, 3, 0, 0);
     ConstructChunkAt(Vector(0, 0, 0));
@@ -508,14 +471,13 @@ SDL_AppResult App::Init() {
     ConstructChunkAt(Vector(0, 0, -16));
     ConstructChunkAt(Vector(16, 0, 0));
     ConstructChunkAt(Vector(-16, 0, 0));
-    //ConstructChunkAt(Vector(-16, 0, -16));
-    //ConstructChunkAt(Vector(-16, 0, 16));
-    //ConstructChunkAt(Vector(16, 0, -16));
-    //ConstructChunkAt(Vector(16, 0, 16));
-
-    ReupdateVertexBuffers();
+    ConstructChunkAt(Vector(-16, 0, -16));
+    ConstructChunkAt(Vector(-16, 0, 16));
+    ConstructChunkAt(Vector(16, 0, -16));
+    ConstructChunkAt(Vector(16, 0, 16));
 
     SDL_WaitForGPUIdle(m_gpuDevice.get()); //Block rednering and showing window until gpu is idle
+
     SDL_Log("Showing the window.. %f ms", start / 1000000.0);
     //Creating gpu device in swap chain takes long time, people would see empty or trashed window, thus we show window after some time
     if (!SDL_ShowWindow(m_Window.get())) {
@@ -578,8 +540,10 @@ SDL_AppResult App::Event(const SDL_Event *event) {
             }
 
             if (event->key.key == SDLK_SPACE) {
-                // MoveCameraLocal(Vector(0.f, .2f, 0.f), kCameraMoveStep);
-                sceneCamera->SetMoveState(Camera::Up, true);
+                auto raycastHit = RaycastRay(sceneCamera->Position, GetGravityVector().Normalized(), kCameraHeightAboveGround);
+                if (raycastHit.hit) {
+                    sceneCamera->SetMoveState(Camera::Up, true);
+                }
             }
 
             if (event->key.key == SDLK_LSHIFT) {
@@ -1006,24 +970,11 @@ SDL_AppResult App::OnUpdate() {
     return CONTINUE;
 }
 
-void App::ReupdateVertexBuffers() {
-    //Clear objects, and add new ones from chunks?
-    simulation->ClearObjects();
-    for (auto &chunk: worldChunks) {
-        for (const auto &[pos, isSolid]: chunk.blocks) {
-            if (isSolid) {
-                Object e{cubeMesh, chunk.atPosition + pos};
-                simulation->RegisterObjectInScene(e);
-            }
-        }
-    }
-}
-
 void App::ConstructChunkAt(Vector atPos, bool flat) {
-    Chunk<chunkSizeXYZ> chunk(atPos);
+    Chunk<ChunkManager::chunkSizeXYZ> chunk(atPos);
 
-    for (int x = 0; x < chunkSizeXYZ; x++) {
-        for (int z = 0; z < chunkSizeXYZ; z++) {
+    for (int x = 0; x < ChunkManager::chunkSizeXYZ; x++) {
+        for (int z = 0; z < ChunkManager::chunkSizeXYZ; z++) {
             float rawNoiseVal = noise->noise(x * noise->mFrequency, z * noise->mFrequency);
             //for now, just make it so it goes from 0,1 instead of -1, 1
             rawNoiseVal += 0.5f;
@@ -1036,7 +987,8 @@ void App::ConstructChunkAt(Vector atPos, bool flat) {
 
             //min limit is -1 presumably
             for (; y >= -1; y--) {
-                chunk.blocks[Vector(x, y, z)] = true; //for now we have either block or no block, to be replaced w enum?
+                Object e{cubeMesh, chunk.atPosition + Vector(x, y, z)};
+                chunk.blocks[Vector(x, y, z)] = e; //for now we have either block or no block, to be replaced w enum?
             }
         }
     }
@@ -1054,13 +1006,13 @@ RaycastHit App::CheckIsPointInsideAny(Vector point) const {
             std::floor(localPoint.z + kBlockHalfExtent)
         );
 
-        if (blockPosition.x < 0 || blockPosition.x >= chunkSizeXYZ ||
-            blockPosition.z < 0 || blockPosition.z >= chunkSizeXYZ) {
+        if (blockPosition.x < 0 || blockPosition.x >= ChunkManager::chunkSizeXYZ ||
+            blockPosition.z < 0 || blockPosition.z >= ChunkManager::chunkSizeXYZ) {
             continue;
         }
 
         const auto block = chunk.blocks.find(blockPosition);
-        if (block != chunk.blocks.end() && block->second) {
+        if (block != chunk.blocks.end()) {
             return RaycastHit{
                 .hit = true,
                 .blockType = true,
@@ -1110,20 +1062,6 @@ SDL_AppResult App::OnRender() {
     Matrix4D viewMatrix = camera.GetViewMatrix();
     Matrix4D projectionMatrix = camera.GetProjectionMatrix();
 
-    // auto view = Matrix4D(
-    //     1, 0, 0, 0,
-    //     0, 1, 0, -2,
-    //     0, 0, -1, -3,
-    //     0, 0, 0, 1
-    // );
-    //
-    // auto proj = Matrix4D(
-    //     0.67, 0, 0, 0,
-    //     0, 1.19, 0, 0,
-    //     0, 0, -1.001, -0.1001,
-    //     0, 0, -1, 0
-    // );
-
     float float16Array[16];
     Matrix4D viewProjection = projectionMatrix * viewMatrix;
     viewProjection.toOutFloat16Array(float16Array);
@@ -1146,9 +1084,12 @@ SDL_AppResult App::OnRender() {
     int totalVertexNumber = 0;
     int totalLineVertexNumber = 0;
 
-    for (int i = 0; i < simulation->registerObjectIndex; i += 1) {
-        totalVertexNumber += getDrawVertexCount(simulation->objectsInScene[i].mesh);
-        totalLineVertexNumber += getLineVertexCount(simulation->objectsInScene[i].mesh);
+    for (auto &chunk: worldChunks) {
+        for (auto kvp: chunk.blocks) {
+            //TODO: replace all occurances like these as soon as there are 2 block types
+            totalVertexNumber += getDrawVertexCount(cubeMesh);
+            totalLineVertexNumber += getLineVertexCount(cubeMesh);
+        }
     }
 
     const int lineStartVertex = totalVertexNumber;
@@ -1157,29 +1098,33 @@ SDL_AppResult App::OnRender() {
 
     //Verticies for both objects and lines
     int cpyIndex = 0;
-    for (int i = 0; i < simulation->registerObjectIndex; ++i) {
-        Object o = simulation->objectsInScene[i];
-        if (o.mesh != nullptr) {
-            const int drawVertexCount = getDrawVertexCount(o.mesh);
-            Vertex3D *verts = o.GetObjectDrawCallVerticies();
-            if (verts != nullptr) {
-                memcpy(verticies.data() + cpyIndex, verts, drawVertexCount * sizeof(Vertex3D));
-                delete[] verts; // prevent memory leak
-                cpyIndex += drawVertexCount;
+    // for (int i = 0; i < simulation->registerObjectIndex; ++i) {
+    //     Object o = simulation->objectsInScene[i];
+
+    for (auto &chunk: worldChunks) {
+        for (auto kvp: chunk.blocks) {
+            if (kvp.second.mesh != nullptr) {
+                const int drawVertexCount = getDrawVertexCount(kvp.second.mesh);
+                Vertex3D *verts = kvp.second.GetObjectDrawCallVerticies();
+                if (verts != nullptr) {
+                    memcpy(verticies.data() + cpyIndex, verts, drawVertexCount * sizeof(Vertex3D));
+                    delete[] verts; // prevent memory leak
+                    cpyIndex += drawVertexCount;
+                }
             }
         }
     }
 
-    for (int i = 0; i < simulation->registerObjectIndex; ++i) {
-        Object o = simulation->objectsInScene[i];
-
-        if (o.mesh != nullptr) {
-            const int lineVertexCount = getLineVertexCount(o.mesh);
-            Vertex3D *verts = o.GetObjectLineVerticies();
-            if (verts != nullptr) {
-                memcpy(verticies.data() + cpyIndex, verts, lineVertexCount * sizeof(Vertex3D));
-                delete[] verts; //prevent memory leak
-                cpyIndex += lineVertexCount;
+    for (auto &chunk: worldChunks) {
+        for (auto kvp: chunk.blocks) {
+            if (kvp.second.mesh != nullptr) {
+                const int lineVertexCount = getLineVertexCount(kvp.second.mesh);
+                Vertex3D *verts = kvp.second.GetObjectLineVerticies();
+                if (verts != nullptr) {
+                    memcpy(verticies.data() + cpyIndex, verts, lineVertexCount * sizeof(Vertex3D));
+                    delete[] verts; //prevent memory leak
+                    cpyIndex += lineVertexCount;
+                }
             }
         }
     }
@@ -1249,7 +1194,7 @@ SDL_AppResult App::OnRender() {
         return FAILURE;
     }
 
-    if (!swapchainTexture) {
+    if (swapchainTexture == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Swapchain texture is null");
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
@@ -1272,36 +1217,31 @@ SDL_AppResult App::OnRender() {
 
     //Begin render pass
     SDL_GPURenderPass *renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorTargetInfo, 1, &depthTarget);
-    if (!renderPass) {
+    if (renderPass == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to begin render pass");
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
     }
 
-    // SDL_GPUViewport viewport = {0, 0, (float) screenWidth, (float) screenHeight, 0.0f, 1.0f};
-    // SDL_SetGPUViewport(renderPass, &viewport);
+    SDL_GPUViewport viewport = {0, 0, (float) screenWidth, (float) screenHeight, 0.0f, 1.0f};
+    SDL_SetGPUViewport(renderPass, &viewport);
 
     SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
 
     //Bind our vertex buffer/s
-    if (vertexDataSize > 0) {
-        SDL_GPUBufferBinding vertexBinding = {sceneVertexBuffer, 0};
-        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+    SDL_GPUBufferBinding vertexBinding = {sceneVertexBuffer, 0};
+    SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
 
-        // SDL_Log("colourTexture = %p, colourSa
-        SDL_GPUTextureSamplerBinding bindings[2] =
-        {
-            {colourTexture, colourSampler},
-            {normalTexture, normalSampler},
-        };
+    SDL_GPUTextureSamplerBinding bindings[2] =
+    {
+        {colourTexture, colourSampler},
+        {normalTexture, normalSampler},
+    };
 
-        SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 2);
-
-        SDL_DrawGPUPrimitives(renderPass, totalVertexNumber, 1, 0, 0);
-
-        SDL_BindGPUGraphicsPipeline(renderPass, lineGraphicsPipeline);
-        SDL_DrawGPUPrimitives(renderPass, totalLineVertexNumber, 1, lineStartVertex, 0);
-    }
+    SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 2);
+    SDL_DrawGPUPrimitives(renderPass, totalVertexNumber, 1, 0, 0);
+    SDL_BindGPUGraphicsPipeline(renderPass, lineGraphicsPipeline);
+    SDL_DrawGPUPrimitives(renderPass, totalLineVertexNumber, 1, lineStartVertex, 0);
 
     SDL_EndGPURenderPass(renderPass);
 

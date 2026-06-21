@@ -5,7 +5,7 @@
 
 #include "Ray.h"
 #include "core/Chunk.h"
-#include "core/Simulation.h"
+#include "core/ChunkManager.h"
 
 class App {
 public:
@@ -38,9 +38,7 @@ public:
         SDL_GPUShaderFormat sdlFormat;
     };
 
-    static constexpr int chunkSizeXYZ = 16; //starting from 0,0,0 it goes to -8,-8,-8 and to 8,8,8
-
-    std::vector<Chunk<chunkSizeXYZ> > worldChunks;
+    std::vector<Chunk<ChunkManager::chunkSizeXYZ> > worldChunks;
     SDL_GPUBuffer *uniformBuffer = nullptr;
 
     static Vector GetGravityVector();
@@ -48,6 +46,8 @@ public:
 private:
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> m_Window;
     std::unique_ptr<SDL_GPUDevice, decltype(&SDL_DestroyGPUDevice)> m_gpuDevice;
+
+    ChunkManager *chunkManager;
 
     Vector cubeVerticies[8] =
     {
@@ -80,7 +80,7 @@ private:
 
     SDL_AppResult OnUpdate();
 
-    void ReupdateVertexBuffers();
+    // void ReupdateSimulationVectors();
 
     void ConstructChunkAt(Vector, bool flat = false);
 
@@ -106,7 +106,7 @@ private:
     Uint64 deltaTimeMS = 0; //KEEP IN MIND - NEED TO DIVIDE BY 1000 TO GET SECONDS
     Uint64 currentMillisecondsSinceStart;
 
-    std::unique_ptr<Simulation> simulation;
+    // std::unique_ptr<Simulation> simulation;
 
     const char *kVertexShaderPath = "shaders/vertex.spv";
     const char *kFragmentShaderPath = "shaders/fragment.spv";

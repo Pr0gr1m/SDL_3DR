@@ -6,8 +6,6 @@ set(CMAKE_CXX_STANDARD 23)
 add_executable(${PROJECT_NAME} src/main.cpp
         src/App.cpp
         src/App.h
-        src/core/Simulation.cpp
-        src/core/Simulation.h
         src/core/Object.h
         src/core/Vector.h
         src/core/Mesh.h
@@ -24,6 +22,8 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/core/noise/SimplexNoise.cpp
         src/core/noise/SimplexNoise.h
         src/Ray.h
+        src/core/ChunkManager.cpp
+        src/core/ChunkManager.h
 )
 
 find_package(SDL3 CONFIG REQUIRED)

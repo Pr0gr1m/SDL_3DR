@@ -2,6 +2,7 @@
 #define SDL1_CHUNK_H
 #include <map>
 
+#include "Object.h"
 #include "Vector.h"
 
 template<int N>
@@ -9,9 +10,7 @@ class Chunk {
 public:
     size_t blocksNumber = N;
     Vector atPosition = Vector(0, 0, 0);
-    // bool blocks[N][N][N]{};
-    std::map<Vector, bool> blocks;
-
+    std::map<Vector, Object> blocks;
 
     Chunk() = default;
 

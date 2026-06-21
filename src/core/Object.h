@@ -53,16 +53,16 @@ public:
     Vector rotationAngleRadians; //alpha, beta, gamma are about axes z y and x rx(gamma) ry(beta), rz(alpha)
     Matrix3D *rotationMatrix3D;
 
+    Vector acceleration{};
+    Vector velocity{};
+
+    float mass = 1;
+
     Object(Mesh *mesh, Vector position, Vector rotAngle) : mesh(mesh), Position(position), rotationAngleRadians(rotAngle) {
         float alpha = rotationAngleRadians.z;
         float beta = rotationAngleRadians.y;
         float gamma = rotationAngleRadians.x;
 
-        // rotationMatrix3D = new Matrix3D(
-        //     cos(beta) * cos(gamma), sin(alpha) * sin(beta) * cos(gamma) - (cos(alpha) * sin(gamma)), cos(alpha) * sin(beta) * cos(gamma) + (sin(alpha) * sin(gamma)),
-        //     cos(beta) * cos(gamma), sin(alpha) * sin(beta) * cos(gamma) + (cos(alpha) * cos(gamma)), cos(alpha) * sin(beta) * sin(gamma) - (sin(alpha) * cos(gamma)),
-        //     -sin(beta), sin(alpha) * cos(beta), cos(alpha) * cos(beta)
-        // );
         float cx = cos(alpha), sx = sin(alpha);
         float cy = cos(beta), sy = sin(beta);
         float cz = cos(gamma), sz = sin(gamma);
@@ -144,6 +144,7 @@ public:
 
             return std::pair<float, float>{point.x + UVOffset, point.y + UVOffset};
         };
+
         if (mesh->numTriangles <= 0 || mesh->triangles == nullptr) {
             Vertex3D *verticies = new Vertex3D[mesh->numVerticies];
 
@@ -175,12 +176,14 @@ public:
             auto rv2 = rotationMatrix3D->Multiply(v2);
             auto rv3 = rotationMatrix3D->Multiply(v3);
             auto localFaceNormal = (v2 - v1).Cross(v3 - v1).Normalized();
+
             const Vector localFaceCenter = (v1 + v2 + v3) / 3.f;
             if (localFaceNormal.Dot(localFaceCenter) < 0.f) {
                 localFaceNormal = localFaceNormal * -1.f;
             }
-            
+
             auto faceNormal = (rv2 - rv1).Cross(rv3 - rv1).Normalized();
+
             const Vector faceCenter = (rv1 + rv2 + rv3) / 3.f;
             if (faceNormal.Dot(faceCenter) < 0.f) {
                 faceNormal = faceNormal * -1.f;
@@ -281,10 +284,17 @@ public:
         return lineVertices;
     }
 
+    void AddForceAcceleration(Vector force);
+
     bool operator==(const Object &object) const {
         return mesh == object.mesh && Position == object.Position;
     }
 };
+
+inline void Object::AddForceAcceleration(Vector force) {
+    this->acceleration += (force / mass);
+}
+
 
 #endif //SDL1_OBJECT_H
 
