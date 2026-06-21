@@ -14,11 +14,14 @@ void main()
     // Sample albedo
     vec3 albedo = texture(colourMap, v_texcoord).rgb;
 
+    //    float albedoE = -0.25f;
+    //    albedo += vec3(albedoE, albedoE, albedoE);
+
     // Sample tangent-space normal
     vec3 sampledNormal = texture(normalMap, v_texcoord).rgb;
     sampledNormal = sampledNormal * 2.0 - 1.0;
 
-    // Construct TBN matrix
+    // Construct TBN (Tangent bitangent normal) matrix
     vec3 N = normalize(v_normal);
     vec3 T = normalize(v_tangent - N * dot(v_tangent, N));
     vec3 B = normalize(cross(N, T));
@@ -31,10 +34,11 @@ void main()
     // Directional light
     vec3 lightDir = normalize(vec3(-0.35, 0.85, 0.45));
 
-    float ambient = 0.25;
+    float ambient = 0.25f; //TODO: Calculate ambient from screen AO?
     float diffuse = max(dot(normal, lightDir), 0.0);
 
     vec3 lighting = vec3(ambient + diffuse * 0.75);
 
     FragColor = vec4(albedo * lighting, 1.0);
+    //    FragColor = vec4(lighting.rgb, 1.0);
 }

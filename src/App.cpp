@@ -53,7 +53,7 @@ static constexpr float kCameraHeightAboveGround = 1.5f;
 static constexpr float kGravityMultiplier = 1;
 
 static std::string pathToNormalTexture = "src\\img\\dirtNormal.jpg"; //To be replaced with some sort of TextureManager
-static std::string pathToColourTexture = "src\\img\\dirt2c.jpg";
+static std::string pathToColourTexture = "src\\img\\dirttexture1.jpg";
 //also maybe the textures should be cached?
 
 Vector startingCameraPos = Vector(0.f, 2.f, -3.f);
@@ -64,8 +64,8 @@ SimplexNoise *noise;
 
 //TODO: Replace fixed size of numObjectsInScene, maybe predict with gen. algorythm number of naturally gen. blocks and have a vector/map of player placed objects? / Or a very big array
 //TODO: Also replace Simulation class as its unecessary since I could just refactor everything into Object.h class? (ignoring that definitions are there whatever)
-//TODO: Also find out why adding normals reduced fps to like 30 from 500. I could cache sampler and texture info for normal texture but im not sure how to do it
-//TODO: Also find a better dirt textures. Or at least find out why and how to prevent tiling 4 on 1 block
+//TODO: Before full release, change CMakeList.txt to put built shaders in build dir, im not sure how building app works but its better that way
+//TODO: Replace built in paths with some texture manager
 
 namespace {
     Camera BuildCameraFromState() {
@@ -222,18 +222,19 @@ SDL_AppResult App::Init() {
     SDL_Log("Setting GPU swapchain parameters.. %f ms", start / 1000000.0);
     SDL_SetGPUSwapchainParameters(m_gpuDevice.get(), m_Window.get(), SDL_GPU_SWAPCHAINCOMPOSITION_SDR, presentMode);
 
-    std::string vPath = std::string(basePath) + "src/shaders/vertex.spv";
-    std::string fPath = std::string(basePath) + "src/shaders/fragment.spv";
+    //Exit out of build directory
+    std::string vPath = std::string(basePath) + "../src/shaders/vertex.spv";
+    std::string fPath = std::string(basePath) + "../src/shaders/fragment.spv";
 
-    // If it's running from build folder, basePath might point to build.
-    // Let's try to see if we can find them in parent dir if size is 0
     size_t vertexShaderCodeSize;
     void *vertexShaderCode = SDL_LoadFile(vPath.c_str(), &vertexShaderCodeSize);
+
     if (vertexShaderCodeSize == 0) {
         SDL_free(vertexShaderCode);
-        vPath = std::string(basePath) + "../src/shaders/vertex.spv";
-        vertexShaderCode = SDL_LoadFile(vPath.c_str(), &vertexShaderCodeSize);
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to load vertex shader: %s", SDL_GetError());
+        return FAILURE;
     }
+
     SDL_Log("Loaded vertex shader from %s, size: %zu", vPath.c_str(), vertexShaderCodeSize);
     fflush(stdout);
 
@@ -251,8 +252,10 @@ SDL_AppResult App::Init() {
     };
 
     SDL_GPUShader *vertexShader = SDL_CreateGPUShader(m_gpuDevice.get(), &vertexShaderInfo);
-    if (!vertexShader) {
+
+    if (vertexShader == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create vertex shader: %s", SDL_GetError());
+        return FAILURE;
     }
     SDL_Log("Vertex shader created: %p", vertexShader);
     fflush(stdout);
@@ -261,17 +264,18 @@ SDL_AppResult App::Init() {
     SDL_Log("Loading and creating fragment shaders.. %f ms", start / 1000000.0);
     size_t fragmentShaderCodeSize;
     void *fragmentShaderCode = SDL_LoadFile(fPath.c_str(), &fragmentShaderCodeSize);
+
     if (fragmentShaderCodeSize == 0) {
         SDL_free(fragmentShaderCode);
-        fPath = std::string(basePath) + "../src/shaders/fragment.spv";
-        fragmentShaderCode = SDL_LoadFile(fPath.c_str(), &fragmentShaderCodeSize);
+
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to load fragment shader: %s", SDL_GetError());
+        return FAILURE;
     }
+
     SDL_Log("Loaded fragment shader from %s, size: %zu", fPath.c_str(), fragmentShaderCodeSize);
     fflush(stdout);
 
-    if (fragmentShaderCodeSize > 0) {
-        SDL_Log("First 50 chars: %.50s", (char *) fragmentShaderCode);
-    }
+    // SDL_Log("First 50 chars: %.50s", (char *) fragmentShaderCode);
 
     SDL_GPUShaderCreateInfo fragmentShaderInfo{
         .code_size = fragmentShaderCodeSize,
@@ -287,9 +291,11 @@ SDL_AppResult App::Init() {
     };
 
     SDL_GPUShader *fragmentShader = SDL_CreateGPUShader(m_gpuDevice.get(), &fragmentShaderInfo);
+
     if (!fragmentShader) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create fragment shader: %s", SDL_GetError());
     }
+
     SDL_Log("Fragment shader created: %p", fragmentShader);
     fflush(stdout);
     SDL_free(fragmentShaderCode);
