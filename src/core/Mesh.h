@@ -7,6 +7,11 @@
 
 class Mesh {
 public:
+    ~Mesh() {
+        delete verticies;
+        delete triangles;
+    }
+
     Vector *verticies = nullptr;
     Int3 *triangles = nullptr;
 
@@ -19,16 +24,8 @@ public:
         : verticies(verticies), triangles(triangles), numVerticies(numVerticies), numTriangles(numTriangles) {
     }
 
-    // void Set(Vector *verticies, int numVerticies, Int3 *triangles = nullptr, int numTriangles = 0) {
-    //     this->verticies = verticies;
-    //     this->triangles = triangles;
-    //
-    //     this->numVerticies = numVerticies;
-    //     this->numTriangles = numTriangles;
-    // }
-
-    bool operator==(const Mesh &mesh) {
-        return numVerticies == mesh.numVerticies && verticies == mesh.verticies;
+    bool operator==(const Mesh &mesh) const {
+        return numVerticies == mesh.numVerticies && verticies == mesh.verticies && numTriangles == mesh.numTriangles && triangles == mesh.triangles;
     }
 };
 

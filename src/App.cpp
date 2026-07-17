@@ -38,31 +38,28 @@
 //16x16x16 chunk for each vertex buffer?
 //and only chunks within range are loaded, at runtime and stored in RAM?
 
-static constexpr float screenWidth = 1600;
-static constexpr float screenHeight = 900;
-static constexpr float aspectRatio = screenWidth / screenHeight;
+static constexpr float defaultScreenWidth = 1600;
+static constexpr float defaultScreenHeight = 900;
+static constexpr float aspectRatio = defaultScreenWidth / defaultScreenHeight;
 
 static constexpr float kMouseLookSensitivity = 0.2f;
-static constexpr float kMoveSpeed = 0.15f;
-static constexpr float kJumpForceMagnitude = 3.f;
+static constexpr float kMoveSpeed = 1.75f;
+static constexpr float kJumpForceMagnitude = 0.3f;
 static constexpr float kBlockHalfExtent = 0.5f;
 static constexpr float kCameraHeightAboveGround = 1.5f;
 static constexpr float kGravityMultiplier = 1;
 
-static std::string pathToNormalTexture = "src\\img\\dirtNormal.jpg"; //To be replaced with some sort of TextureManager
-static std::string pathToColourTexture = "src\\img\\dirttexture1.jpg";
-//also maybe the textures should be cached?
+static SimplexNoise *noise;
 
-Vector startingCameraPos = Vector(0.f, 2.f, -3.f);
+Vector startingCameraPos = Vector(0.f, 2.f, 3.f);
 Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
 Camera *sceneCamera = nullptr;
 
-SimplexNoise *noise;
-
-//TODO: Before full release, change CMakeList.txt to put built shaders in build dir, im not sure how building app works but its better that way
-//TODO: Replace built in paths with some texture manager
+//TODO: Before full release, change CMakeList.txt to put built shaders in build dir, im not sure how building app works here
 //TODO: Improve RaycastRay accuracy / reliability
-//TODO: Optimize with cullings
+//TODO: Add caching to texture manager, maybe some CMake commands to recache
+//TODO: Optimize with diff. cullings
+//TODO: Add screen space GI?
 
 namespace {
     Camera BuildCameraFromState() {
@@ -110,19 +107,19 @@ namespace {
 
     void MoveCameraBasedOnStates() {
         if (sceneCamera->GetMoveState(Camera::Forward)) {
-            MoveCameraHorizontal(Vector(0.f, 0.f, 1.f), kMoveSpeed);
+            MoveCameraHorizontal(Vector(0.f, 0.f, 1.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Backward)) {
-            MoveCameraHorizontal(Vector(0.f, 0.f, -1.f), kMoveSpeed);
+            MoveCameraHorizontal(Vector(0.f, 0.f, -1.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Left)) {
-            MoveCameraHorizontal(Vector(-1.f, 0.f, 0.f), kMoveSpeed);
+            MoveCameraHorizontal(Vector(-1.f, 0.f, 0.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Right)) {
-            MoveCameraHorizontal(Vector(1.f, 0.f, 0.f), kMoveSpeed);
+            MoveCameraHorizontal(Vector(1.f, 0.f, 0.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Up)) {
@@ -138,9 +135,6 @@ namespace {
 App::App(int argc, char **argv) : m_Window(nullptr, &SDL_DestroyWindow), m_gpuDevice(nullptr, &SDL_DestroyGPUDevice) {
 }
 
-App::~App() {
-};
-
 SDL_AppResult App::Init() {
     SDL_SetAppMetadata("2DRenderer", "1.0.0", "com.cozyprogramming.renderer2d");
 
@@ -153,22 +147,24 @@ SDL_AppResult App::Init() {
     }
 
     SDL_Log("Initializing SDL Window.. %f ms", start / 1000000.0);
-    m_Window.reset(SDL_CreateWindow("SDL1", screenWidth, screenHeight, SDL_WINDOW_HIDDEN));
+    m_Window.reset(SDL_CreateWindow("SDL1", defaultScreenWidth, defaultScreenHeight, SDL_WINDOW_HIDDEN));
+
+    if (m_Window == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not initialize SDL window: %s", SDL_GetError());
+        return FAILURE;
+    }
 
     SDL_SetWindowRelativeMouseMode(m_Window.get(), true); //Fullscreen mode
 
     //Get base path to build directionary
+    //TODO: Find reason and fix for base path sometimes being unreadable
     this->basePath = const_cast<char *>(SDL_GetBasePath());
 
     if (basePath == nullptr) {
         SDL_Log("Getting base path failed (nullptr): %s", SDL_GetError());
     }
 
-    if (!m_Window) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not initialize SDL window: %s", SDL_GetError());
-        return FAILURE;
-    }
-
+    //Choose driver based on preferred drivers
     const std::array preferredDrives
     {
         std::string{"vulkan"},
@@ -186,20 +182,20 @@ SDL_AppResult App::Init() {
         gpuDrivers.emplace_back(SDL_GetGPUDriver(i));
     }
 
-    std::string prefferedDriver;
+    std::string selectedDriver;
     for (const auto driver: preferredDrives) {
         if (std::ranges::find(gpuDrivers, driver) != gpuDrivers.end()) {
             SDL_Log("Using preffered driver: %s", driver.c_str());
-            prefferedDriver = driver;
+            selectedDriver = driver;
             break;
         }
     }
 
     m_gpuDevice.reset(SDL_CreateGPUDevice(
         SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL, false,
-        prefferedDriver.empty() ? nullptr : prefferedDriver.c_str()));
+        selectedDriver.empty() ? nullptr : selectedDriver.c_str()));
 
-    if (!m_gpuDevice) {
+    if (m_gpuDevice == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create GPU device: %s", SDL_GetError());
         return FAILURE;
     }
@@ -233,8 +229,6 @@ SDL_AppResult App::Init() {
     }
 
     SDL_Log("Loaded vertex shader from %s, size: %zu", vPath.c_str(), vertexShaderCodeSize);
-    fflush(stdout);
-
     SDL_GPUShaderCreateInfo vertexShaderInfo{
         .code_size = vertexShaderCodeSize,
         .code = static_cast<Uint8 *>(vertexShaderCode),
@@ -254,25 +248,20 @@ SDL_AppResult App::Init() {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create vertex shader: %s", SDL_GetError());
         return FAILURE;
     }
+
     SDL_Log("Vertex shader created: %p", vertexShader);
-    fflush(stdout);
     SDL_free(vertexShaderCode);
 
     SDL_Log("Loading and creating fragment shaders.. %f ms", start / 1000000.0);
     size_t fragmentShaderCodeSize;
     void *fragmentShaderCode = SDL_LoadFile(fPath.c_str(), &fragmentShaderCodeSize);
-
     if (fragmentShaderCodeSize == 0) {
         SDL_free(fragmentShaderCode);
-
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to load fragment shader: %s", SDL_GetError());
         return FAILURE;
     }
 
     SDL_Log("Loaded fragment shader from %s, size: %zu", fPath.c_str(), fragmentShaderCodeSize);
-    fflush(stdout);
-
-    // SDL_Log("First 50 chars: %.50s", (char *) fragmentShaderCode);
 
     SDL_GPUShaderCreateInfo fragmentShaderInfo{
         .code_size = fragmentShaderCodeSize,
@@ -294,9 +283,8 @@ SDL_AppResult App::Init() {
     }
 
     SDL_Log("Fragment shader created: %p", fragmentShader);
-    fflush(stdout);
+
     SDL_free(fragmentShaderCode);
-    SDL_free(basePath);
 
     SDL_Log("Creating GPU pipelines infos.. %f ms", start / 1000000.0);
 
@@ -379,8 +367,8 @@ SDL_AppResult App::Init() {
     //Depth texture
     SDL_GPUTextureCreateInfo depthInfo = {};
     depthInfo.type = SDL_GPU_TEXTURETYPE_2D;
-    depthInfo.width = screenWidth;
-    depthInfo.height = screenHeight;
+    depthInfo.width = defaultScreenWidth;
+    depthInfo.height = defaultScreenHeight;
     depthInfo.layer_count_or_depth = 1;
     depthInfo.num_levels = 1;
     depthInfo.format = SDL_GPU_TEXTUREFORMAT_D32_FLOAT;
@@ -457,24 +445,26 @@ SDL_AppResult App::Init() {
     SDL_WaitForGPUIdle(m_gpuDevice.get());
 
     BuildCameraFromState();
-    currentMillisecondsSinceStart = SDL_GetTicks();
+    sceneCamera->UpdateCameraFrustrumCorners();
 
-    cubeMesh = new Mesh(cubeVerticies, std::size(cubeVerticies), cubeTriangles, std::size(cubeTriangles));
+    this->cubeMesh = new Mesh(cubeVerticies, std::size(cubeVerticies), cubeTriangles, std::size(cubeTriangles));
 
     SDL_Log("Creating simulation.");
     // simulation = std::make_unique<Simulation>();
-    chunkManager = new ChunkManager();
+    this->chunkManager = new ChunkManager();
+    this->textureManager = new TextureManager();
+
+    //texture manager config - to be replaced with threaded loading system and caching
+    this->textureManager->AddEntryForBlockType(TextureManager::Dirt, "img/dirt");
+    this->textureManager->AddEntryForBlockType(TextureManager::OakLog, "img/oak_log");
 
     noise = new SimplexNoise(0.15f, 3, 0, 0);
-    ConstructChunkAt(Vector(0, 0, 0));
-    ConstructChunkAt(Vector(0, 0, 16));
-    ConstructChunkAt(Vector(0, 0, -16));
-    ConstructChunkAt(Vector(16, 0, 0));
-    ConstructChunkAt(Vector(-16, 0, 0));
-    ConstructChunkAt(Vector(-16, 0, -16));
-    ConstructChunkAt(Vector(-16, 0, 16));
-    ConstructChunkAt(Vector(16, 0, -16));
-    ConstructChunkAt(Vector(16, 0, 16));
+
+    for (int cX = -1; cX <= 1; cX++) {
+        for (int cY = -1; cY <= 1; cY++) {
+            ConstructChunkAt(Vector(ChunkManager::chunkSizeXYZ * cX, 0, ChunkManager::chunkSizeXYZ * cY));
+        }
+    }
 
     SDL_WaitForGPUIdle(m_gpuDevice.get()); //Block rednering and showing window until gpu is idle
 
@@ -484,6 +474,8 @@ SDL_AppResult App::Init() {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not show SDL window: %s", SDL_GetError());
         return FAILURE;
     }
+
+    currentMillisecondsSinceStart = SDL_GetTicks();
 
     SDL_Log("All done.. %f ms", start / 1000000.0);
     return CONTINUE;
@@ -513,7 +505,6 @@ SDL_AppResult App::Event(const SDL_Event *event) {
             if (SDL_GetWindowID(m_Window.get()) == event->window.windowID) //For multiple windows
                 return OnQuit();
             return CONTINUE;
-
         case SDL_EVENT_KEY_DOWN:
             if (event->key.key == SDLK_ESCAPE) {
                 return OnQuit();
@@ -546,10 +537,10 @@ SDL_AppResult App::Event(const SDL_Event *event) {
                 }
             }
 
-            if (event->key.key == SDLK_LSHIFT) {
-                // MoveCameraLocal(Vector(0.f, -.2f, 0.f), kCameraMoveStep);
-                sceneCamera->SetMoveState(Camera::Down, true);
+            if (event->key.key == SDLK_F) {
+                sceneCamera->UpdateCameraFrustrumCorners();
             }
+
             break;
         case SDL_EVENT_KEY_UP:
             if (event->key.key == SDLK_W && !event->key.down) {
@@ -600,11 +591,17 @@ SDL_AppResult App::Event(const SDL_Event *event) {
 }
 
 void App::Quit(SDL_AppResult result) const {
-    (void) result; // ?????
+    //Disable compiler warn about unused result arg: https://stackoverflow.com/questions/58019275/what-is-the-purpose-of-voidvariable-in-c
+    (void) result;
+
     SDL_WaitForGPUIdle(m_gpuDevice.get()); //Block thread until GPU is idle
 
     if (sceneVertexBuffer) {
         SDL_ReleaseGPUBuffer(m_gpuDevice.get(), sceneVertexBuffer);
+    }
+
+    if (uniformBuffer) {
+        SDL_ReleaseGPUBuffer(m_gpuDevice.get(), uniformBuffer);
     }
 
     if (graphicsPipeline) {
@@ -635,62 +632,65 @@ void App::Quit(SDL_AppResult result) const {
         SDL_ReleaseGPUSampler(m_gpuDevice.get(), colourSampler);
     }
 
-    SDL_ReleaseWindowFromGPUDevice(m_gpuDevice.get(), m_Window.get()); //Destroys window's swapchains
+    if (basePath) {
+        SDL_free(basePath);
+    }
+
+    if (sceneCamera) {
+        delete sceneCamera;
+    }
+
+    SDL_ReleaseWindowFromGPUDevice(m_gpuDevice.get(), m_Window.get()); //Destroys window's swapchain texture
 }
 
-SDL_AppResult App::OnQuit() const {
+App::~App() = default;
+
+SDL_AppResult App::OnQuit() {
     return SUCCESS;
 }
 
 bool App::UploadDirtTexturesToGPU() {
-    std::string colourTexturePath = std::string(basePath) + "..\\" + pathToColourTexture;
-    std::string normalTexturePath = std::string(basePath) + "..\\" + pathToNormalTexture;
+    // std::string colourTexturePath = std::string(basePath) + "..\\" + pathToColourTexture;
+    // std::string normalTexturePath = std::string(basePath) + "..\\" + pathToNormalTexture;
+    //
+    // SDL_Log("Creating and uploading GPU texture from %s and %s", colourTexturePath.c_str(), normalTexturePath.c_str());
+    // SDL_IOStream *colourTextureStream = SDL_IOFromFile(colourTexturePath.c_str(), "rb");
+    // SDL_IOStream *normalTextureStream = SDL_IOFromFile(normalTexturePath.c_str(), "rb");
+    //
+    // if (colourTextureStream == nullptr || normalTextureStream == nullptr) {
+    //     SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s or %s", colourTexturePath.c_str(), normalTexturePath.c_str());
+    //     return false;
+    // }
+    //
+    // //Load surfaces of the files
+    // SDL_Surface *colourSurface = IMG_LoadJPG_IO(colourTextureStream);
+    // SDL_CloseIO(colourTextureStream);
+    //
+    // SDL_Surface *normalSurface = IMG_LoadJPG_IO(normalTextureStream);
+    // SDL_CloseIO(normalTextureStream);
+    //
+    // if (colourSurface == nullptr || normalSurface == nullptr) {
+    //     SDL_LogError(APP_LOG_CATEGORY_GENERIC, "IMG_LoadJPG_IO failed: %s", SDL_GetError());
+    //     return false;
+    // }
+    //
+    // //Convert surface's format as allegedly IMG_LoadJPG_IO may return surfaces with (random?) weird pixel formats
+    // SDL_Surface *convertedColourSurface = SDL_ConvertSurface(colourSurface, SDL_PIXELFORMAT_RGBA32);
+    // SDL_DestroySurface(colourSurface);
+    //
+    // SDL_Surface *convertedNormalSurface = SDL_ConvertSurface(normalSurface, SDL_PIXELFORMAT_RGBA32);
+    // SDL_DestroySurface(normalSurface);
+    //
+    // if (!convertedColourSurface || !convertedNormalSurface) {
+    //     SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_ConvertSurface failed");
+    //     SDL_DestroySurface(convertedColourSurface);
+    //     SDL_DestroySurface(convertedNormalSurface);
+    //
+    //     return false;
+    // }
 
-    SDL_Log("Creating and uploading GPU texture from %s and %s", colourTexturePath.c_str(), normalTexturePath.c_str());
-    SDL_IOStream *colourTextureStream = SDL_IOFromFile(colourTexturePath.c_str(), "rb");
-    SDL_IOStream *normalTextureStream = SDL_IOFromFile(normalTexturePath.c_str(), "rb");
-
-    if (colourTextureStream == nullptr || normalTextureStream == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s or %s", colourTexturePath.c_str(), normalTexturePath.c_str());
-        SDL_Log("Getting the base path again.");
-
-        //base path oftently breaks or has weird data idk why
-        // auto newBasePath = const_cast<char *>(SDL_GetBasePath());
-        // SDL_Log("Reaccquired base path: %s", newBasePath);
-        //
-        // if (newBasePath == basePath) {
-        //     SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not reaccquire base path. Restart.");
-        // }
-        //
-        return false;
-    }
-
-    //Load surfaces of the files
-    SDL_Surface *colourSurface = IMG_LoadJPG_IO(colourTextureStream);
-    SDL_CloseIO(colourTextureStream);
-
-    SDL_Surface *normalSurface = IMG_LoadJPG_IO(normalTextureStream);
-    SDL_CloseIO(normalTextureStream);
-
-    if (colourSurface == nullptr || normalSurface == nullptr) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "IMG_LoadJPG_IO failed: %s", SDL_GetError());
-        return false;
-    }
-
-    //Convert surface's format as allegedly IMG_LoadJPG_IO may return surfaces with (random?) weird pixel formats
-    SDL_Surface *convertedColourSurface = SDL_ConvertSurface(colourSurface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(colourSurface);
-
-    SDL_Surface *convertedNormalSurface = SDL_ConvertSurface(normalSurface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(normalSurface);
-
-    if (!convertedColourSurface) {
-        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_ConvertSurface failed");
-        SDL_DestroySurface(convertedColourSurface);
-        SDL_DestroySurface(convertedNormalSurface);
-
-        return false;
-    }
+    SDL_Surface *convertedColourSurface = this->textureManager->lodSurfaceFromTexture(TextureManager::Dirt, TextureManager::Colour);
+    SDL_Surface *convertedNormalSurface = this->textureManager->lodSurfaceFromTexture(TextureManager::Dirt, TextureManager::Normal);
 
     // Create the GPU texture
     SDL_GPUTextureCreateInfo colourTextureInfo = {};
@@ -789,30 +789,23 @@ bool App::UploadDirtTexturesToGPU() {
     SDL_Log("%i", sizeof(colourSourcePixels));
     SDL_Log("%i", sizeof(normalSourcePixels));
 
-    // SDL_memcpy(colourTransferMapped, colourSourcePixels, colourSizeInBytes); //since no pitch wait wtf it works?
-    // SDL_memcpy(normalTransferMapped, normalSourcePixels, normalSizeInBytes);
-
-    SDL_Log("A");
     for (Uint32 y = 0; y < colourTextureInfo.height; ++y) {
         SDL_memcpy(colourTransferMapped + (y * colourBytesPerRow),
                    colourSourcePixels + (y * convertedColourSurface->pitch),
-                   normalBytesPerRow);
+                   colourBytesPerRow);
     }
-    SDL_Log("B");
     for (Uint32 y = 0; y < normalTextureInfo.height; ++y) {
         SDL_memcpy(normalTransferMapped + (y * normalBytesPerRow),
                    normalSourcePixels + (y * convertedNormalSurface->pitch),
                    normalBytesPerRow);
     }
-    SDL_Log("C");
 
     SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
     SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
 
-    SDL_Log("D");
     // Upload
     SDL_GPUCommandBuffer *cmd = SDL_AcquireGPUCommandBuffer(m_gpuDevice.get());
-    SDL_Log("E");
+
     if (cmd == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Acquire command buffer failed: %s", SDL_GetError());
 
@@ -844,7 +837,6 @@ bool App::UploadDirtTexturesToGPU() {
         return false;
     }
 
-    SDL_Log("F");
     SDL_GPUTextureTransferInfo colourSourceInfo = {};
     colourSourceInfo.transfer_buffer = colourTransferBuffer;
     colourSourceInfo.offset = 0;
@@ -861,10 +853,8 @@ bool App::UploadDirtTexturesToGPU() {
     colourDestinationInfo.h = colourTextureInfo.height;
     colourDestinationInfo.d = 1;
 
-    SDL_Log("G");
     SDL_UploadToGPUTexture(colourCopyPass, &colourSourceInfo, &colourDestinationInfo, false);
     SDL_EndGPUCopyPass(colourCopyPass);
-    SDL_Log("H");
 
     SDL_GPUCopyPass *normalCopyPass = SDL_BeginGPUCopyPass(cmd);
     if (normalCopyPass == nullptr) {
@@ -883,7 +873,6 @@ bool App::UploadDirtTexturesToGPU() {
         return false;
     }
 
-    SDL_Log("I");
     SDL_GPUTextureTransferInfo normalSourceInfo = {};
     normalSourceInfo.transfer_buffer = normalTransferBuffer;
     normalSourceInfo.offset = 0;
@@ -900,11 +889,8 @@ bool App::UploadDirtTexturesToGPU() {
     normalDestinationInfo.h = normalTextureInfo.height;
     normalDestinationInfo.d = 1;
 
-    SDL_Log("J");
     SDL_UploadToGPUTexture(normalCopyPass, &normalSourceInfo, &normalDestinationInfo, false);
     SDL_EndGPUCopyPass(normalCopyPass);
-
-    SDL_Log("K");
 
     if (!SDL_SubmitGPUCommandBuffer(cmd)) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Submit command buffer failed: %s", SDL_GetError());
@@ -949,16 +935,18 @@ bool App::UploadDirtTexturesToGPU() {
 
 SDL_AppResult App::OnUpdate() {
     deltaTimeMS = SDL_GetTicks() - currentMillisecondsSinceStart;
+    sceneCamera->deltaTimeMS = deltaTimeMS;
+
     currentMillisecondsSinceStart = SDL_GetTicks();
 
     sceneCamera->MoveCameraBasedOnVelocity();
 
-    if (sceneCamera->Position.y >= 0) {
-        sceneCamera->AddForceThisTick((GetGravityVector() * deltaTimeMS / 1000 * kGravityMultiplier));
+    if (sceneCamera->Position.y >= kCameraHeightAboveGround) {
+        sceneCamera->AddForceThisTick((GetGravityVector() * (int) (deltaTimeMS / 1000 * kGravityMultiplier)));
     } else {
         // SDL_Log("%f", sceneCamera->Position.y);
         sceneCamera->ResetVelocityAlongWorldAxis(Vector(0, 1, 0));
-        //sceneCamera->Position.y = 0 + kCameraHeightAboveGround;
+        sceneCamera->Position.y = 0 + kCameraHeightAboveGround;
     }
 
     auto hit = RaycastRay(sceneCamera->Position, GetGravityVector().Normalized(), kCameraHeightAboveGround);
@@ -972,11 +960,9 @@ SDL_AppResult App::OnUpdate() {
 
 void App::ConstructChunkAt(Vector atPos, bool flat) {
     Chunk<ChunkManager::chunkSizeXYZ> chunk(atPos);
-
     for (int x = 0; x < ChunkManager::chunkSizeXYZ; x++) {
         for (int z = 0; z < ChunkManager::chunkSizeXYZ; z++) {
-            float rawNoiseVal = noise->noise(x * noise->mFrequency, z * noise->mFrequency);
-            //for now, just make it so it goes from 0,1 instead of -1, 1
+            float rawNoiseVal = SimplexNoise::noise(x * noise->mFrequency, z * noise->mFrequency);
             rawNoiseVal += 0.5f;
             rawNoiseVal /= 2;
 
@@ -985,19 +971,27 @@ void App::ConstructChunkAt(Vector atPos, bool flat) {
             // int y = flat ? 0 : (int) (noise->mAmplitude * rawNoiseVal);
             int y = flat ? 0 : (int) rawNoiseVal;
 
+            //chunk.blocks[Vector(x, 0, z)] = {cubeMesh, chunk.atPosition + Vector(x, 0, z)};
+
+            // SDL_Log("x=%d, z=%d", x, z);
+            const Vector pos = Vector(x, 0, z);
+            // SDL_Log("pos=(%f,%f,%f)", pos.x, pos.y, pos.z);
+            const Object obj = {cubeMesh, chunk.atPosition + Vector(x, 0, z)};
+            
+            chunk.blocks.emplace(pos, obj);
+
             //min limit is -1 presumably
             for (; y >= -1; y--) {
-                Object e{cubeMesh, chunk.atPosition + Vector(x, y, z)};
-                chunk.blocks[Vector(x, y, z)] = e; //for now we have either block or no block, to be replaced w enum?
+                chunk.blocks[Vector(x, y, z)] = {cubeMesh, chunk.atPosition + Vector(x, y, z)}; //for now we have either block or no block, to be replaced w enum?
             }
         }
     }
 
-    worldChunks.push_back(chunk);
+    chunkManager->worldChunks.push_back(chunk);
 }
 
 RaycastHit App::CheckIsPointInsideAny(Vector point) const {
-    for (auto &chunk: worldChunks) {
+    for (auto &chunk: chunkManager->worldChunks) {
         const Vector localPoint = point - chunk.atPosition;
 
         const Vector blockPosition(
@@ -1053,18 +1047,42 @@ Vector App::GetGravityVector() {
 
 SDL_AppResult App::OnRender() {
     SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_gpuDevice.get());
-    if (!commandBuffer) {
+    if (commandBuffer == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to acquire command buffer: %s", SDL_GetError());
         return FAILURE;
     }
 
-    Camera camera = *sceneCamera;
-    Matrix4D viewMatrix = camera.GetViewMatrix();
-    Matrix4D projectionMatrix = camera.GetProjectionMatrix();
+    sceneCamera->UpdateCameraFrustrumCorners();
+
+    Matrix4D viewMatrix = sceneCamera->GetViewMatrix();
+    Matrix4D projectionMatrix = sceneCamera->GetProjectionMatrix();
+    Matrix4D viewProjection = projectionMatrix * viewMatrix;
 
     float float16Array[16];
-    Matrix4D viewProjection = projectionMatrix * viewMatrix;
     viewProjection.toOutFloat16Array(float16Array);
+
+    /*
+    SDL_Log("PP %f %f %f", sceneCamera->Position.x, sceneCamera->Position.y, sceneCamera->Position.z);
+
+    viewMatrix.toOutFloat16Array(float16Array);
+    for (int i = 0; i < 16; i++) {
+        SDL_Log("%f", float16Array[i]);
+    }
+
+    SDL_Log("");
+
+    projectionMatrix.toOutFloat16Array(float16Array);
+    for (int i = 0; i < 16; i++) {
+        SDL_Log("%f", float16Array[i]);
+    }
+
+    SDL_Log("");
+
+    viewProjection.toOutFloat16Array(float16Array);
+    for (int i = 0; i < 16; i++) {
+        SDL_Log("%f", float16Array[i]);
+    }
+    */
 
     SDL_PushGPUVertexUniformData(
         commandBuffer,
@@ -1073,64 +1091,93 @@ SDL_AppResult App::OnRender() {
         sizeof(float16Array)
     );
 
-    auto getDrawVertexCount = [](Mesh *mesh) {
-        return mesh->numTriangles > 0 ? mesh->numTriangles * 3 : mesh->numVerticies;
+    auto getMeshDrawCallVerticies = [](Mesh *mesh) {
+        return mesh->numTriangles > 0 ? mesh->numTriangles * 3 : 0; //count numTriangles cuz triangles is what we render not verticies
     };
 
-    auto getLineVertexCount = [](Mesh *mesh) {
-        return mesh->numTriangles > 0 ? mesh->numTriangles * 6 : mesh->numVerticies * 2;
+    // auto isMeshInCamerFrustrum = [](Mesh *mesh, Vector objPosition) {
+    //     if (mesh->numVerticies <= 0) return false;
+    //     for (int i = 0; i < mesh->numVerticies; i++) {
+    //         auto vertex = mesh->verticies[i];
+    //         vertex += objPosition;
+    //         if (!sceneCamera->IsPointInFrustum(vertex)) { return false; }
+    //     }
+    //     return true;
+    // };
+
+    auto isMeshInCamerFrustrum = [](Mesh *mesh, Vector objPosition) {
+        if (mesh->numVerticies == 0) return false;
+
+        for (const auto &plane: sceneCamera->frustrumPlanes) {
+            bool allOutside = true;
+            for (int i = 0; i < mesh->numVerticies; ++i) {
+                Vector v = mesh->verticies[i] + objPosition;
+                float d = plane.A * v.x + plane.B * v.y + plane.C * v.z + plane.D;
+                if (d >= 0.0f) {
+                    // inside (or on) the plane
+                    allOutside = false;
+                    break;
+                }
+            }
+            if (allOutside) {
+                return false; // completely outside this plane → cull
+            }
+        }
+        return true;
     };
 
     int totalVertexNumber = 0;
     int totalLineVertexNumber = 0;
+    std::vector<Object> nonFrustrumCulledObjects; //if this only has visible blocks it should be fine to store in 1 array as there probably wont be that many
+    for (auto &chunk: chunkManager->worldChunks) {
+        // SDL_Log(". Chunk");
+        for (const auto kvp: chunk.blocks) {
+            // SDL_Log("\t Block at %f,%f,%f", kvp.second.Position.x, kvp.second.Position.y, kvp.second.Position.z);
+            if (isMeshInCamerFrustrum(kvp.second.mesh, kvp.second.Position)) {
+                nonFrustrumCulledObjects.push_back(kvp.second);
 
-    for (auto &chunk: worldChunks) {
-        for (auto kvp: chunk.blocks) {
-            //TODO: replace all occurances like these as soon as there are 2 block types
-            totalVertexNumber += getDrawVertexCount(cubeMesh);
-            totalLineVertexNumber += getLineVertexCount(cubeMesh);
+                auto drawVertexCount = getMeshDrawCallVerticies(kvp.second.mesh);
+                totalVertexNumber += drawVertexCount * 1;
+                totalLineVertexNumber += drawVertexCount * 2;
+                // SDL_Log("\t NT %i NV %i", kvp.second.mesh->numTriangles, kvp.second.mesh->numVerticies);
+                // SDL_Log("\t So far TNV %i", totalVertexNumber);
+            }
         }
     }
+
+    SDL_Log("Finished fustrum culling. Num of not culled meshes: %i", nonFrustrumCulledObjects.size());
+    SDL_Log("Num of verticies total: %i", totalVertexNumber);
+    SDL_Log("FPS: %i", 1000 / deltaTimeMS);
 
     const int lineStartVertex = totalVertexNumber;
     const int totalUploadedVertexNumber = totalVertexNumber + totalLineVertexNumber;
     std::vector<Vertex3D> verticies(totalUploadedVertexNumber);
 
-    //Verticies for both objects and lines
-    int cpyIndex = 0;
-    // for (int i = 0; i < simulation->registerObjectIndex; ++i) {
-    //     Object o = simulation->objectsInScene[i];
-
-    for (auto &chunk: worldChunks) {
-        for (auto kvp: chunk.blocks) {
-            if (kvp.second.mesh != nullptr) {
-                const int drawVertexCount = getDrawVertexCount(kvp.second.mesh);
-                Vertex3D *verts = kvp.second.GetObjectDrawCallVerticies();
-                if (verts != nullptr) {
-                    memcpy(verticies.data() + cpyIndex, verts, drawVertexCount * sizeof(Vertex3D));
-                    delete[] verts; // prevent memory leak
-                    cpyIndex += drawVertexCount;
-                }
-            }
-        }
-    }
-
-    for (auto &chunk: worldChunks) {
-        for (auto kvp: chunk.blocks) {
-            if (kvp.second.mesh != nullptr) {
-                const int lineVertexCount = getLineVertexCount(kvp.second.mesh);
-                Vertex3D *verts = kvp.second.GetObjectLineVerticies();
-                if (verts != nullptr) {
-                    memcpy(verticies.data() + cpyIndex, verts, lineVertexCount * sizeof(Vertex3D));
-                    delete[] verts; //prevent memory leak
-                    cpyIndex += lineVertexCount;
-                }
-            }
-        }
-    }
-
     const Uint32 vertexDataSize = totalUploadedVertexNumber * sizeof(Vertex3D);
     if (vertexDataSize > 0) {
+        int cpyIndex = 0;
+        for (auto &object: nonFrustrumCulledObjects) {
+            const int drawVertexCount = getMeshDrawCallVerticies(object.mesh);
+            Vertex3D *verts = object.GetObjectMeshDrawCallVerticies();
+
+            if (verts != nullptr) {
+                memcpy(verticies.data() + cpyIndex, verts, drawVertexCount * sizeof(Vertex3D));
+                delete[] verts;
+                cpyIndex += drawVertexCount;
+            }
+        }
+
+        for (auto &object: nonFrustrumCulledObjects) {
+            const int lineVertexCount = 2 * getMeshDrawCallVerticies(object.mesh);
+            Vertex3D *verts = object.GetObjectLineVerticies();
+
+            if (verts != nullptr) {
+                memcpy(verticies.data() + cpyIndex, verts, lineVertexCount * sizeof(Vertex3D));
+                delete[] verts; //prevent memory leak
+                cpyIndex += lineVertexCount;
+            }
+        }
+
         if (!sceneVertexBuffer || sceneVertexBufferSize < vertexDataSize) {
             if (sceneVertexBuffer) {
                 SDL_ReleaseGPUBuffer(m_gpuDevice.get(), sceneVertexBuffer);
@@ -1187,7 +1234,7 @@ SDL_AppResult App::OnRender() {
     }
 
     //Acquire the swapchain texture for rendering
-    SDL_GPUTexture *swapchainTexture = nullptr;
+    SDL_GPUTexture *swapchainTexture;
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not acquire swapchain texture: %s", SDL_GetError());
         SDL_SubmitGPUCommandBuffer(commandBuffer);
@@ -1223,25 +1270,27 @@ SDL_AppResult App::OnRender() {
         return FAILURE;
     }
 
-    SDL_GPUViewport viewport = {0, 0, (float) screenWidth, (float) screenHeight, 0.0f, 1.0f};
+    SDL_GPUViewport viewport = {0, 0, (float) defaultScreenWidth, (float) defaultScreenHeight, 0.0f, 1.0f};
     SDL_SetGPUViewport(renderPass, &viewport);
 
-    SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
+    if (totalUploadedVertexNumber > 0 && sceneVertexBuffer != nullptr) {
+        SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
 
-    //Bind our vertex buffer/s
-    SDL_GPUBufferBinding vertexBinding = {sceneVertexBuffer, 0};
-    SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+        //Bind our vertex buffer/s
+        SDL_GPUBufferBinding vertexBinding = {sceneVertexBuffer, 0};
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
 
-    SDL_GPUTextureSamplerBinding bindings[2] =
-    {
-        {colourTexture, colourSampler},
-        {normalTexture, normalSampler},
-    };
+        SDL_GPUTextureSamplerBinding bindings[2] =
+        {
+            {colourTexture, colourSampler},
+            {normalTexture, normalSampler},
+        };
 
-    SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 2);
-    SDL_DrawGPUPrimitives(renderPass, totalVertexNumber, 1, 0, 0);
-    SDL_BindGPUGraphicsPipeline(renderPass, lineGraphicsPipeline);
-    SDL_DrawGPUPrimitives(renderPass, totalLineVertexNumber, 1, lineStartVertex, 0);
+        SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 2);
+        SDL_DrawGPUPrimitives(renderPass, totalVertexNumber, 1, 0, 0);
+        SDL_BindGPUGraphicsPipeline(renderPass, lineGraphicsPipeline);
+        SDL_DrawGPUPrimitives(renderPass, totalLineVertexNumber, 1, lineStartVertex, 0);
+    }
 
     SDL_EndGPURenderPass(renderPass);
 

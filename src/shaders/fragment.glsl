@@ -14,9 +14,6 @@ void main()
     // Sample albedo
     vec3 albedo = texture(colourMap, v_texcoord).rgb;
 
-    //    float albedoE = -0.25f;
-    //    albedo += vec3(albedoE, albedoE, albedoE);
-
     // Sample tangent-space normal
     vec3 sampledNormal = texture(normalMap, v_texcoord).rgb;
     sampledNormal = sampledNormal * 2.0 - 1.0;
@@ -38,7 +35,6 @@ void main()
     float diffuse = max(dot(normal, lightDir), 0.0);
 
     vec3 lighting = vec3(ambient + diffuse * 0.75);
-
+    
     FragColor = vec4(albedo * lighting, 1.0);
-    //    FragColor = vec4(lighting.rgb, 1.0);
 }

@@ -6,6 +6,7 @@
 #include "Ray.h"
 #include "core/Chunk.h"
 #include "core/ChunkManager.h"
+#include "core/TextureManager.h"
 
 class App {
 public:
@@ -30,7 +31,7 @@ public:
 
     enum class ShaderBinaryFormat {
         Spirv,
-        Dxil,
+        Dxil, //unused
     };
 
     struct LoadedShaderBinary {
@@ -38,16 +39,17 @@ public:
         SDL_GPUShaderFormat sdlFormat;
     };
 
-    std::vector<Chunk<ChunkManager::chunkSizeXYZ> > worldChunks;
-    SDL_GPUBuffer *uniformBuffer = nullptr;
-
     static Vector GetGravityVector();
+
+    Uint64 deltaTimeMS; //KEEP IN MIND - NEED TO DIVIDE BY 1000 TO GET SECONDS
+    Uint64 currentMillisecondsSinceStart;
 
 private:
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> m_Window;
     std::unique_ptr<SDL_GPUDevice, decltype(&SDL_DestroyGPUDevice)> m_gpuDevice;
 
     ChunkManager *chunkManager;
+    TextureManager *textureManager;
 
     Vector cubeVerticies[8] =
     {
@@ -72,7 +74,7 @@ private:
 
     Mesh *cubeMesh{};
 
-    SDL_AppResult OnQuit() const;
+    static SDL_AppResult OnQuit();
 
     bool UploadDirtTexturesToGPU();
 
@@ -80,9 +82,9 @@ private:
 
     SDL_AppResult OnUpdate();
 
-    // void ReupdateSimulationVectors();
-
     void ConstructChunkAt(Vector, bool flat = false);
+
+    bool isPointInsideCameraFrustrumView(Vector);
 
     RaycastHit CheckIsPointInsideAny(Vector) const;
 
@@ -92,19 +94,16 @@ private:
     Uint32 sceneVertexBufferSize = 0;
     SDL_GPUGraphicsPipeline *graphicsPipeline = nullptr;
     SDL_GPUGraphicsPipeline *lineGraphicsPipeline = nullptr;
+    SDL_GPUBuffer *uniformBuffer = nullptr;
 
     SDL_GPUTexture *depthTexture = nullptr;
 
-    //TODO: dont have one default normal and colour texture or sampler
     SDL_GPUTexture *normalTexture = nullptr;
     SDL_GPUSampler *normalSampler = nullptr;
     SDL_GPUTexture *colourTexture = nullptr;
     SDL_GPUSampler *colourSampler = nullptr;
 
     char *basePath;
-
-    Uint64 deltaTimeMS = 0; //KEEP IN MIND - NEED TO DIVIDE BY 1000 TO GET SECONDS
-    Uint64 currentMillisecondsSinceStart;
 
     // std::unique_ptr<Simulation> simulation;
 

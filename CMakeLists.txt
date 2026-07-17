@@ -24,6 +24,8 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/Ray.h
         src/core/ChunkManager.cpp
         src/core/ChunkManager.h
+        src/core/TextureManager.cpp
+        src/core/TextureManager.h
 )
 
 find_package(SDL3 CONFIG REQUIRED)

@@ -8,7 +8,6 @@
 template<int N>
 class Chunk {
 public:
-    size_t blocksNumber = N;
     Vector atPosition = Vector(0, 0, 0);
     std::map<Vector, Object> blocks;
 

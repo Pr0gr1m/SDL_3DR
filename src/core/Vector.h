@@ -47,6 +47,14 @@ public:
         return Vector(x * a, y * a, z * a);
     }
 
+    Vector operator*(int a) const {
+        return Vector(x * a, y * a, z * a);
+    }
+
+    Vector operator*(Vector a) const {
+        return Vector(x * a.x, y * a.y, z * a.z);
+    }
+
     Vector operator/(float a) const {
         if (a == 0) {
             return Vector(0, 0, 0);
@@ -73,6 +81,14 @@ public:
         this->y *= vector.y;
         this->z *= vector.z;
         return *this;
+    }
+
+    Vector CrossProduct(const Vector &a, const Vector &b) {
+        return {
+            a.y * b.z - a.z * b.y,
+            a.z * b.x - a.x * b.z,
+            a.x * b.y - a.y * b.x
+        };
     }
 };
 
@@ -104,6 +120,10 @@ inline Vector Vector::Cross(const Vector &other) const {
 inline float Vector::Dot(const Vector &other) const {
     return x * other.x + y * other.y + z * other.z;
 }
+
+// Vector operator*(int lhs, const Vector &rhs) {
+//     return Vector(lhs * rhs.x, lhs * rhs.y, lhs * rhs.z);
+// }
 
 //After decleration?
 

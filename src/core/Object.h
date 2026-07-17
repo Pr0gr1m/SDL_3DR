@@ -11,63 +11,59 @@
 
 class Object {
 public:
-    Object() : mesh(nullptr), Position(0, 0, 0), rotationAngleRadians(0, 0, 0) {
-        rotationMatrix3D = new Matrix3D(1, 0, 0, 0, 1, 0, 0, 0, 1);
+    Object() : mesh(nullptr), Position(0, 0, 0) {
+        rotationMatrix3D = {
+            1, 0, 0,
+            0, 1, 0,
+            0, 0, 1
+        };
     }
 
-    Object(Mesh *m1, Vector pos) : mesh(m1), Position(pos), rotationAngleRadians(0, 0, 0) {
-        float alpha = rotationAngleRadians.z;
-        float beta = rotationAngleRadians.y;
-        float gamma = rotationAngleRadians.x;
+    Object(Mesh *m1, Vector pos) : mesh(m1), Position(pos) {
+        float alpha = 0, beta = 0, gamma = 0;
 
-        // rotationMatrix3D = new Matrix3D(
-        //     cos(beta) * cos(gamma), sin(alpha) * sin(beta) * cos(gamma) - (cos(alpha) * sin(gamma)), cos(alpha) * sin(beta) * cos(gamma) + (sin(alpha) * sin(gamma)),
-        //     cos(beta) * cos(gamma), sin(alpha) * sin(beta) * cos(gamma) + (cos(alpha) * cos(gamma)), cos(alpha) * sin(beta) * sin(gamma) - (sin(alpha) * cos(gamma)),
-        //     -sin(beta), sin(alpha) * cos(beta), cos(alpha) * cos(beta)
-        // );
         float cx = cos(alpha), sx = sin(alpha);
         float cy = cos(beta), sy = sin(beta);
         float cz = cos(gamma), sz = sin(gamma);
 
-        rotationMatrix3D = new Matrix3D(
-            // Row 0 (X axis in world after rotation)
+        rotationMatrix3D = {
+            //Row 0 (X axis in world after rotation)
             cy * cz,
             sx * sy * cz - cx * sz,
             cx * sy * cz + sx * sz,
 
-            // Row 1 (Y axis)
+            //Row 1 (Y axis)
             cy * sz,
             sx * sy * sz + cx * cz,
             cx * sy * sz - sx * cz,
 
-            // Row 2 (Z axis)
+            //Row 2 (Z axis)
             -sy,
             sx * cy,
             cx * cy
-        );
+        };
     }
 
     Mesh *mesh;
     Vector Position;
-
-    Vector rotationAngleRadians; //alpha, beta, gamma are about axes z y and x rx(gamma) ry(beta), rz(alpha)
-    Matrix3D *rotationMatrix3D;
+    
+    Matrix3D rotationMatrix3D{};
 
     Vector acceleration{};
     Vector velocity{};
 
     float mass = 1;
 
-    Object(Mesh *mesh, Vector position, Vector rotAngle) : mesh(mesh), Position(position), rotationAngleRadians(rotAngle) {
-        float alpha = rotationAngleRadians.z;
-        float beta = rotationAngleRadians.y;
-        float gamma = rotationAngleRadians.x;
+    Object(Mesh *mesh, Vector position, Vector rotAngle) : mesh(mesh), Position(position) {
+        float alpha = rotAngle.z;
+        float beta = rotAngle.y;
+        float gamma = rotAngle.x;
 
         float cx = cos(alpha), sx = sin(alpha);
         float cy = cos(beta), sy = sin(beta);
         float cz = cos(gamma), sz = sin(gamma);
 
-        rotationMatrix3D = new Matrix3D(
+        rotationMatrix3D = {
             // Row 0 (X axis in world after rotation)
             cy * cz,
             sx * sy * cz - cx * sz,
@@ -82,36 +78,37 @@ public:
             -sy,
             sx * cy,
             cx * cy
-        );
+        };
     };
 
-    void RecalculateRotationMatrix() {
-        float alpha = rotationAngleRadians.z;
-        float beta = rotationAngleRadians.y;
-        float gamma = rotationAngleRadians.x;
+    // void RecalculateRotationMatrix() {
+    //     float alpha = rotAngle.z;
+    //     float beta = rotAngle.y;
+    //     float gamma = rotAngle.x;
+    //
+    //     float cx = cos(alpha), sx = sin(alpha);
+    //     float cy = cos(beta), sy = sin(beta);
+    //     float cz = cos(gamma), sz = sin(gamma);
+    //
+    //     delete rotationMatrix3D;
+    //     rotationMatrix3D = new Matrix3D(
+    //         // Row 0 (X axis in world after rotation)
+    //         cy * cz,
+    //         sx * sy * cz - cx * sz,
+    //         cx * sy * cz + sx * sz,
+    //         // Row 1 (Y axis)
+    //         cy * sz,
+    //         sx * sy * sz + cx * cz,
+    //         cx * sy * sz - sx * cz,
+    //
+    //         // Row 2 (Z axis)
+    //         -sy,
+    //         sx * cy,
+    //         cx * cy
+    //     );
+    // }
 
-        float cx = cos(alpha), sx = sin(alpha);
-        float cy = cos(beta), sy = sin(beta);
-        float cz = cos(gamma), sz = sin(gamma);
-
-        rotationMatrix3D = new Matrix3D(
-            // Row 0 (X axis in world after rotation)
-            cy * cz,
-            sx * sy * cz - cx * sz,
-            cx * sy * cz + sx * sz,
-            // Row 1 (Y axis)
-            cy * sz,
-            sx * sy * sz + cx * cz,
-            cx * sy * sz - sx * cz,
-
-            // Row 2 (Z axis)
-            -sy,
-            sx * cy,
-            cx * cy
-        );
-    }
-
-    Vertex3D *GetObjectDrawCallVerticies() const {
+    Vertex3D *GetObjectMeshDrawCallVerticies() const {
         auto chooseFaceTangent = [](const Vector &normal) {
             const float absX = std::fabs(normal.x);
             const float absY = std::fabs(normal.y);
@@ -150,7 +147,7 @@ public:
 
             for (int i = 0; i < mesh->numVerticies; i += 1) {
                 Vector verticie = mesh->verticies[i];
-                Vector rotatedVerticie = rotationMatrix3D->Multiply(verticie);
+                Vector rotatedVerticie = rotationMatrix3D.Multiply(verticie);
 
                 verticies[i].Position = rotatedVerticie + Position;
                 verticies[i].Color = SDL_FColor{.0f, .0f, .0f, 1.0f};
@@ -172,9 +169,9 @@ public:
             auto v2 = mesh->verticies[triangle.b];
             auto v3 = mesh->verticies[triangle.c];
 
-            auto rv1 = rotationMatrix3D->Multiply(v1);
-            auto rv2 = rotationMatrix3D->Multiply(v2);
-            auto rv3 = rotationMatrix3D->Multiply(v3);
+            auto rv1 = rotationMatrix3D.Multiply(v1);
+            auto rv2 = rotationMatrix3D.Multiply(v2);
+            auto rv3 = rotationMatrix3D.Multiply(v3);
             auto localFaceNormal = (v2 - v1).Cross(v3 - v1).Normalized();
 
             const Vector localFaceCenter = (v1 + v2 + v3) / 3.f;
@@ -189,7 +186,7 @@ public:
                 faceNormal = faceNormal * -1.f;
             }
 
-            auto faceTangent = rotationMatrix3D->Multiply(chooseFaceTangent(localFaceNormal)).Normalized();
+            auto faceTangent = rotationMatrix3D.Multiply(chooseFaceTangent(localFaceNormal)).Normalized();
             auto uv1 = chooseFaceUv(v1, localFaceNormal);
             auto uv2 = chooseFaceUv(v2, localFaceNormal);
             auto uv3 = chooseFaceUv(v3, localFaceNormal);
@@ -229,9 +226,9 @@ public:
             for (int i = 0; i < mesh->numTriangles; i++) {
                 const Int3 triangle = mesh->triangles[i];
                 const Vector transformed[3] = {
-                    rotationMatrix3D->Multiply(mesh->verticies[triangle.a]) + Position,
-                    rotationMatrix3D->Multiply(mesh->verticies[triangle.b]) + Position,
-                    rotationMatrix3D->Multiply(mesh->verticies[triangle.c]) + Position
+                    rotationMatrix3D.Multiply(mesh->verticies[triangle.a]) + Position,
+                    rotationMatrix3D.Multiply(mesh->verticies[triangle.b]) + Position,
+                    rotationMatrix3D.Multiply(mesh->verticies[triangle.c]) + Position
                 };
 
                 SDL_FColor color{1.f, 1.f, 1.f, .225f};
@@ -268,8 +265,8 @@ public:
         for (int i = 0; i < mesh->numVerticies; i++) {
             int next = (i + 1) % mesh->numVerticies;
 
-            Vector a = rotationMatrix3D->Multiply(mesh->verticies[i]) + Position;
-            Vector b = rotationMatrix3D->Multiply(mesh->verticies[next]) + Position;
+            Vector a = rotationMatrix3D.Multiply(mesh->verticies[i]) + Position;
+            Vector b = rotationMatrix3D.Multiply(mesh->verticies[next]) + Position;
 
             lineVertices[i * 2 + 0].Position = a;
             lineVertices[i * 2 + 0].Color = SDL_FColor{1, 1, 1, 1};
