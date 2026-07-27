@@ -23,7 +23,13 @@
 */
 class TextureManager {
 public:
-    TextureManager() = default;
+    TextureManager(char *basePath) : basePath(basePath) {
+    }
+
+    enum BlockType {
+        Dirt,
+        OakLog,
+    };
 
     enum TextureType {
         Colour,

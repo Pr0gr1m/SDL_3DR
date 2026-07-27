@@ -4,11 +4,6 @@
 
 #include "Chunk.h"
 
-enum BlockType {
-    Dirt,
-    OakLog,
-};
-
 class ChunkManager {
 public:
     static constexpr int chunkSizeXYZ = 16; //starting from 0,0,0 the chunk it goes from -8,-8,-8 and to 8,8,8

@@ -107,19 +107,19 @@ namespace {
 
     void MoveCameraBasedOnStates() {
         if (sceneCamera->GetMoveState(Camera::Forward)) {
-            MoveCameraHorizontal(Vector(0.f, 0.f, 1.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
+            MoveCameraHorizontal(Vector(0.f, 0.f, 1.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Backward)) {
-            MoveCameraHorizontal(Vector(0.f, 0.f, -1.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
+            MoveCameraHorizontal(Vector(0.f, 0.f, -1.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Left)) {
-            MoveCameraHorizontal(Vector(-1.f, 0.f, 0.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
+            MoveCameraHorizontal(Vector(-1.f, 0.f, 0.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Right)) {
-            MoveCameraHorizontal(Vector(1.f, 0.f, 0.f), kMoveSpeed * sceneCamera->deltaTimeMS / 1000.f);
+            MoveCameraHorizontal(Vector(1.f, 0.f, 0.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
         }
 
         if (sceneCamera->GetMoveState(Camera::Up)) {
@@ -156,16 +156,28 @@ SDL_AppResult App::Init() {
 
     SDL_SetWindowRelativeMouseMode(m_Window.get(), true); //Fullscreen mode
 
-    //Get base path to build directionary
-    //TODO: Find reason and fix for base path sometimes being unreadable
-    this->basePath = const_cast<char *>(SDL_GetBasePath());
+    //Get base path to source directionary
+    //TODO: Add every texture to the build directory and fix this
+    char *buildBasePath = const_cast<char *>(SDL_GetBasePath());
+    std::string basePathStr(buildBasePath);
+    SDL_free(buildBasePath);
 
-    if (basePath == nullptr) {
-        SDL_Log("Getting base path failed (nullptr): %s", SDL_GetError());
+    // Remove "build\" or "build/" from the end if it exists
+    if (basePathStr.ends_with("build\\") || basePathStr.ends_with("build/")) {
+        basePathStr.erase(basePathStr.length() - 6);
+    } else if (basePathStr.ends_with("build")) {
+        basePathStr.erase(basePathStr.length() - 5);
     }
 
+    basePathStr += "src\\";
+
+    this->basePath = static_cast<char *>(SDL_malloc(basePathStr.length() + 1));
+    SDL_strlcpy(this->basePath, basePathStr.c_str(), basePathStr.length() + 1);
+
+    SDL_Log("Base path: %s", this->basePath);
+
     //Choose driver based on preferred drivers
-    const std::array preferredDrives
+    const std::array<std::string, 2> preferredDrives
     {
         std::string{"vulkan"},
         std::string{"direct3d12"},
@@ -191,6 +203,7 @@ SDL_AppResult App::Init() {
         }
     }
 
+    SDL_Log("Creating GPU driver device.. %f ms", start / 1000000.0);
     m_gpuDevice.reset(SDL_CreateGPUDevice(
         SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL, false,
         selectedDriver.empty() ? nullptr : selectedDriver.c_str()));
@@ -216,8 +229,8 @@ SDL_AppResult App::Init() {
     SDL_SetGPUSwapchainParameters(m_gpuDevice.get(), m_Window.get(), SDL_GPU_SWAPCHAINCOMPOSITION_SDR, presentMode);
 
     //Exit out of build directory
-    std::string vPath = std::string(basePath) + "../src/shaders/vertex.spv";
-    std::string fPath = std::string(basePath) + "../src/shaders/fragment.spv";
+    std::string vPath = std::string(basePath) + "/shaders/vertex.spv";
+    std::string fPath = std::string(basePath) + "/shaders/fragment.spv";
 
     size_t vertexShaderCodeSize;
     void *vertexShaderCode = SDL_LoadFile(vPath.c_str(), &vertexShaderCodeSize);
@@ -438,10 +451,6 @@ SDL_AppResult App::Init() {
     SDL_ReleaseGPUShader(m_gpuDevice.get(), vertexShader);
     SDL_ReleaseGPUShader(m_gpuDevice.get(), fragmentShader);
 
-    if (!UploadDirtTexturesToGPU()) {
-        return FAILURE;
-    }
-
     SDL_WaitForGPUIdle(m_gpuDevice.get());
 
     BuildCameraFromState();
@@ -449,14 +458,17 @@ SDL_AppResult App::Init() {
 
     this->cubeMesh = new Mesh(cubeVerticies, std::size(cubeVerticies), cubeTriangles, std::size(cubeTriangles));
 
-    SDL_Log("Creating simulation.");
-    // simulation = std::make_unique<Simulation>();
+    SDL_Log("Creating managers.");
     this->chunkManager = new ChunkManager();
-    this->textureManager = new TextureManager();
+    this->textureManager = new TextureManager(this->basePath);
 
     //texture manager config - to be replaced with threaded loading system and caching
-    this->textureManager->AddEntryForBlockType(TextureManager::Dirt, "img/dirt");
-    this->textureManager->AddEntryForBlockType(TextureManager::OakLog, "img/oak_log");
+    this->textureManager->AddEntryForBlockType(TextureManager::Dirt, "img\\dirt\\");
+    this->textureManager->AddEntryForBlockType(TextureManager::OakLog, "img\\oak_log\\");
+
+    if (!UploadDirtTexturesToGPU()) {
+        return FAILURE;
+    }
 
     noise = new SimplexNoise(0.15f, 3, 0, 0);
 
@@ -689,6 +701,11 @@ bool App::UploadDirtTexturesToGPU() {
     //     return false;
     // }
 
+    if (this->textureManager == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "No texture manager.");
+        return false;
+    }
+
     SDL_Surface *convertedColourSurface = this->textureManager->lodSurfaceFromTexture(TextureManager::Dirt, TextureManager::Colour);
     SDL_Surface *convertedNormalSurface = this->textureManager->lodSurfaceFromTexture(TextureManager::Dirt, TextureManager::Normal);
 
@@ -717,11 +734,11 @@ bool App::UploadDirtTexturesToGPU() {
     normalTexture = SDL_CreateGPUTexture(m_gpuDevice.get(), &normalTextureInfo);
 
     SDL_Log(
-        "normal=%ux%u colour=%ux%u",
-        normalTextureInfo.width,
-        normalTextureInfo.height,
+        "colour=%ux%u | normal=%ux%u",
         colourTextureInfo.width,
-        colourTextureInfo.height
+        colourTextureInfo.height,
+        normalTextureInfo.width,
+        normalTextureInfo.height
     );
 
     if (colourTexture == nullptr || normalTexture == nullptr) {
@@ -732,13 +749,14 @@ bool App::UploadDirtTexturesToGPU() {
     }
 
     // Transfer buffer
-    const Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
+    constexpr Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
     const Uint32 colourSizeInBytes = colourTextureInfo.height * colourTextureInfo.width * BytesPerPixel;
     const Uint32 normalSizeInBytes = normalTextureInfo.height * normalTextureInfo.width * BytesPerPixel;
 
     SDL_GPUTransferBufferCreateInfo colourTransferBufferInfo = {};
     colourTransferBufferInfo.size = colourSizeInBytes;
     colourTransferBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+
     SDL_GPUTransferBufferCreateInfo normalTransferBufferInfo = {};
     normalTransferBufferInfo.size = normalSizeInBytes;
     normalTransferBufferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
@@ -785,9 +803,8 @@ bool App::UploadDirtTexturesToGPU() {
     const Uint32 normalBytesPerRow = normalTextureInfo.width * BytesPerPixel;
     const Uint32 colourBytesPerRow = colourTextureInfo.width * BytesPerPixel;
 
-    SDL_Log("2 * %i", colourSizeInBytes);
-    SDL_Log("%i", sizeof(colourSourcePixels));
-    SDL_Log("%i", sizeof(normalSourcePixels));
+    // SDL_Log("%zu", sizeof(colourSourcePixels));
+    // SDL_Log("%zu", sizeof(normalSourcePixels));
 
     for (Uint32 y = 0; y < colourTextureInfo.height; ++y) {
         SDL_memcpy(colourTransferMapped + (y * colourBytesPerRow),
@@ -942,7 +959,7 @@ SDL_AppResult App::OnUpdate() {
     sceneCamera->MoveCameraBasedOnVelocity();
 
     if (sceneCamera->Position.y >= kCameraHeightAboveGround) {
-        sceneCamera->AddForceThisTick((GetGravityVector() * (int) (deltaTimeMS / 1000 * kGravityMultiplier)));
+        sceneCamera->AddForceThisTick((GetGravityVector() * ((float) deltaTimeMS / 1000.f * kGravityMultiplier)));
     } else {
         // SDL_Log("%f", sceneCamera->Position.y);
         sceneCamera->ResetVelocityAlongWorldAxis(Vector(0, 1, 0));
@@ -977,7 +994,7 @@ void App::ConstructChunkAt(Vector atPos, bool flat) {
             const Vector pos = Vector(x, 0, z);
             // SDL_Log("pos=(%f,%f,%f)", pos.x, pos.y, pos.z);
             const Object obj = {cubeMesh, chunk.atPosition + Vector(x, 0, z)};
-            
+
             chunk.blocks.emplace(pos, obj);
 
             //min limit is -1 presumably

@@ -16,7 +16,9 @@ void Camera::AddForceThisTick(Vector dirNorm, float mag) {
 }
 
 void Camera::AddForceThisTick(Vector dir) {
-    cameraVelocity += dir / cameraMass;
+    if (cameraMass != 0) {
+        cameraVelocity += dir / (float) cameraMass;
+    }
 }
 
 void Camera::MoveCameraBasedOnVelocity() {
@@ -60,7 +62,8 @@ void Camera::UpdateCameraFrustrumCorners() {
     std::array<FrustrumPlane, 6> fPlanes{};
 
     float halfFovY = fovY * 0.5f * DEG_2_RAD;
-    float halfFovX = atanf(tanf(halfFovY) * aspect); // horizontal FOV
+    float safeAspect = (aspect == 0.f) ? 1.0f : aspect;
+    float halfFovX = atanf(tanf(halfFovY) * safeAspect); // horizontal FOV
 
     float nearPlaneYDist = near * tanf(halfFovY);
     float nearPlaneXDist = near * tanf(halfFovX);

@@ -3,11 +3,14 @@
 #include "../App.h"
 
 SDL_Surface *TextureManager::lodSurfaceFromTexture(const char *localPathTo) {
-    std::string fullPath = std::string(basePath) + "..\\" + localPathTo;
+    std::string fullPath = std::string(basePath) + localPathTo;
+    SDL_Log("Loading texture: %s", fullPath.c_str());
+
     SDL_IOStream *textureStream = SDL_IOFromFile(fullPath.c_str(), "rb");
 
     if (textureStream == nullptr) {
         SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s", fullPath.c_str());
+        return nullptr;
     }
 
     SDL_Surface *textureSurface = IMG_LoadJPG_IO(textureStream);
@@ -15,6 +18,7 @@ SDL_Surface *TextureManager::lodSurfaceFromTexture(const char *localPathTo) {
 
     if (textureSurface == nullptr) {
         SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "IMG_LoadJPG_IO failed: %s", SDL_GetError());
+        return nullptr;
     }
 
     //Convert surface's format as allegedly IMG_LoadJPG_IO may return surfaces with "weird" pixel formats
@@ -23,6 +27,7 @@ SDL_Surface *TextureManager::lodSurfaceFromTexture(const char *localPathTo) {
 
     if (convertedTextureSurface == nullptr) {
         SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "SDL_ConvertSurface failed: %s", SDL_GetError());
+        return nullptr;
     }
 
     return convertedTextureSurface;
@@ -34,13 +39,15 @@ SDL_Surface *TextureManager::lodSurfaceFromTexture(BlockType blockType, TextureT
 
     if (selectBlockPath.empty()) {
         SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "No path to texture for block type %d", blockType);
+        return nullptr;
     }
 
     if (selectTexturePath.empty()) {
         SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "No path to texture for texture type %d", textureType);
+        return nullptr;
     }
 
-    std::string fullLocalPath = selectBlockPath + selectTexturePath;
+    std::string fullLocalPath = selectBlockPath + selectTexturePath + ".jpg";
 
     return this->lodSurfaceFromTexture(fullLocalPath.c_str());
 }

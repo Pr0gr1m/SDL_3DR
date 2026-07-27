@@ -115,11 +115,15 @@ public:
         float fovRad = fovY * DEG_2_RAD;
         float f = 1.0f / tan(fovRad / 2.0f);
         
+        float safeAspect = (aspect == 0.f) ? 1.f : aspect;
+        float zRange = near - far;
+        if (zRange == 0.f) zRange = -0.001f;
+
         // Vulkan style: z in [0,1]
         return Matrix4D(
-            f / aspect, 0, 0, 0,
+            f / safeAspect, 0, 0, 0,
             0, f, 0, 0,
-            0, 0, far / (near - far), -(far * near) / (far - near),
+            0, 0, far / zRange, -(far * near) / (far - near == 0.f ? 0.001f : far - near),
             0, 0, -1, 0
         );
     }
