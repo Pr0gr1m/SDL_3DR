@@ -11,6 +11,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <execution>
 
 #include "core/noise/SimplexNoise.h"
 #include "core/Vector.h"
@@ -803,9 +804,6 @@ bool App::UploadDirtTexturesToGPU() {
     const Uint32 normalBytesPerRow = normalTextureInfo.width * BytesPerPixel;
     const Uint32 colourBytesPerRow = colourTextureInfo.width * BytesPerPixel;
 
-    // SDL_Log("%zu", sizeof(colourSourcePixels));
-    // SDL_Log("%zu", sizeof(normalSourcePixels));
-
     for (Uint32 y = 0; y < colourTextureInfo.height; ++y) {
         SDL_memcpy(colourTransferMapped + (y * colourBytesPerRow),
                    colourSourcePixels + (y * convertedColourSurface->pitch),
@@ -1122,49 +1120,95 @@ SDL_AppResult App::OnRender() {
     //     return true;
     // };
 
-    auto isMeshInCamerFrustrum = [](Mesh *mesh, Vector objPosition) {
-        if (mesh->numVerticies == 0) return false;
+    // auto isMeshInCamerFrustrum = [](Mesh *mesh, Vector objPosition) {
+    //     if (mesh->numVerticies == 0) return false;
+    //
+    //     for (const auto &plane: sceneCamera->frustrumPlanes) {
+    //         bool allOutside = true;
+    //         for (int i = 0; i < mesh->numVerticies; ++i) {
+    //             Vector v = mesh->verticies[i] + objPosition;
+    //             float d = plane.A * v.x + plane.B * v.y + plane.C * v.z + plane.D;
+    //             if (d >= 0.0f) {
+    //                 // inside (or on) the plane
+    //                 allOutside = false;
+    //                 break;
+    //             }
+    //         }
+    //         if (allOutside) {
+    //             return false; // completely outside this plane → cull
+    //         }
+    //     }
+    //     return true;
+    // };
+
+    auto isFaceInCameraFrustrum = [](Face *globalFace) {
+        if (globalFace == nullptr) return false;
 
         for (const auto &plane: sceneCamera->frustrumPlanes) {
-            bool allOutside = true;
-            for (int i = 0; i < mesh->numVerticies; ++i) {
-                Vector v = mesh->verticies[i] + objPosition;
-                float d = plane.A * v.x + plane.B * v.y + plane.C * v.z + plane.D;
-                if (d >= 0.0f) {
-                    // inside (or on) the plane
-                    allOutside = false;
-                    break;
-                }
-            }
-            if (allOutside) {
-                return false; // completely outside this plane → cull
-            }
+            auto v1 = globalFace->globalPoint1;
+            auto v2 = globalFace->globalPoint2;
+            auto v3 = globalFace->globalPoint3;
+
+            //manually check 3 verticies
+            float d1 = plane.A * v1.x + plane.B * v1.y + plane.C * v1.z + plane.D;
+            if (d1 >= 0.0f) { return false; }
+
+            float d2 = plane.A * v2.x + plane.B * v2.y + plane.C * v2.z + plane.D;
+            if (d2 >= 0.0f) { return false; }
+
+            float d3 = plane.A * v3.x + plane.B * v3.y + plane.C * v3.z + plane.D;
+            if (d3 >= 0.0f) { return false; }
         }
         return true;
     };
 
     int totalVertexNumber = 0;
     int totalLineVertexNumber = 0;
-    std::vector<Object> nonFrustrumCulledObjects; //if this only has visible blocks it should be fine to store in 1 array as there probably wont be that many
-    for (auto &chunk: chunkManager->worldChunks) {
-        // SDL_Log(". Chunk");
-        for (const auto kvp: chunk.blocks) {
-            // SDL_Log("\t Block at %f,%f,%f", kvp.second.Position.x, kvp.second.Position.y, kvp.second.Position.z);
-            if (isMeshInCamerFrustrum(kvp.second.mesh, kvp.second.Position)) {
-                nonFrustrumCulledObjects.push_back(kvp.second);
 
-                auto drawVertexCount = getMeshDrawCallVerticies(kvp.second.mesh);
-                totalVertexNumber += drawVertexCount * 1;
-                totalLineVertexNumber += drawVertexCount * 2;
-                // SDL_Log("\t NT %i NV %i", kvp.second.mesh->numTriangles, kvp.second.mesh->numVerticies);
-                // SDL_Log("\t So far TNV %i", totalVertexNumber);
+    auto startTicks = SDL_GetTicksNS();
+
+    // std::vector<Object> nonFrustrumCulledObjects; //if this only has visible blocks it should be fine to store in 1 array as there probably wont be that many
+    std::vector<Face> nonFrustrumCulledFaces;
+
+    for (auto &chunk: chunkManager->worldChunks) {
+        int iterations = 0;
+        for (const auto kvp: chunk.blocks) {
+            // if (isMeshInCamerFrustrum(kvp.second.mesh, kvp.second.Position)) {
+            //     nonFrustrumCulledObjects.push_back(kvp.second);
+            //
+            //     auto drawVertexCount = getMeshDrawCallVerticies(kvp.second.mesh);
+            //     totalVertexNumber += drawVertexCount * 1;
+            //     totalLineVertexNumber += drawVertexCount * 2;
+            // }
+
+            Vector v1 = kvp.second.rotationMatrix3D.Multiply(kvp.second.Position + kvp.second.mesh->verticies[0 + iterations * 3]);
+            Vector v2 = kvp.second.rotationMatrix3D.Multiply(kvp.second.Position + kvp.second.mesh->verticies[1 + iterations * 3]);
+            Vector v3 = kvp.second.rotationMatrix3D.Multiply(kvp.second.Position + kvp.second.mesh->verticies[2 + iterations * 3]);
+
+            Face face{kvp.second.rotationMatrix3D, v1, v2, v3};
+
+            if (isFaceInCameraFrustrum(&face)) {
+                // nonFrustrumCulledObjects.push_back(kvp.second);
+                nonFrustrumCulledFaces.push_back(face);
+
+                totalVertexNumber += 3;
+                totalLineVertexNumber += 3 * 2;
             }
+
+            iterations++;
         }
     }
 
-    SDL_Log("Finished fustrum culling. Num of not culled meshes: %i", nonFrustrumCulledObjects.size());
+    auto endTicks = SDL_GetTicksNS();
+
+    SDL_Log("Frustrum culling took: %f ms...", (endTicks - startTicks) / 1000000.f);
     SDL_Log("Num of verticies total: %i", totalVertexNumber);
-    SDL_Log("FPS: %i", 1000 / deltaTimeMS);
+
+    if (deltaTimeMS == 0) {
+        SDL_Log("FPS: 0 (0DMS)");
+    } else {
+        SDL_Log("FPS: %i", 1000 / deltaTimeMS);
+    }
 
     const int lineStartVertex = totalVertexNumber;
     const int totalUploadedVertexNumber = totalVertexNumber + totalLineVertexNumber;
@@ -1172,30 +1216,49 @@ SDL_AppResult App::OnRender() {
 
     const Uint32 vertexDataSize = totalUploadedVertexNumber * sizeof(Vertex3D);
     if (vertexDataSize > 0) {
-        int cpyIndex = 0;
-        for (auto &object: nonFrustrumCulledObjects) {
-            const int drawVertexCount = getMeshDrawCallVerticies(object.mesh);
-            Vertex3D *verts = object.GetObjectMeshDrawCallVerticies();
+        // int cpyIndex = 0;
+        // for (auto &object: nonFrustrumCulledObjects) {
+        //     const int drawVertexCount = getMeshDrawCallVerticies(object.mesh);
+        //     Vertex3D *verts = object.GetObjectMeshDrawCallVerticies();
+        //
+        //     if (verts != nullptr) {
+        //         memcpy(verticies.data() + cpyIndex, verts, drawVertexCount * sizeof(Vertex3D));
+        //         delete[] verts;
+        //         cpyIndex += drawVertexCount;
+        //     }
+        // }
+        // std::for_each(nonFrustrumCulledFaces, [&](const Face &face) {
+        //     Vector p1 = face.globalPoint1;
+        //     Vector p2 = face.globalPoint2;
+        //     Vector p3 = face.globalPoint3;
+        // });
 
-            if (verts != nullptr) {
-                memcpy(verticies.data() + cpyIndex, verts, drawVertexCount * sizeof(Vertex3D));
-                delete[] verts;
-                cpyIndex += drawVertexCount;
-            }
-        }
+        std::atomic<size_t> cpyIndex{0};
 
-        for (auto &object: nonFrustrumCulledObjects) {
-            const int lineVertexCount = 2 * getMeshDrawCallVerticies(object.mesh);
-            Vertex3D *verts = object.GetObjectLineVerticies();
+        std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
+            auto drawcallVerts = face.GetFaceDrawCallVerticies();
+            auto start = cpyIndex.fetch_add(3);
+            memcpy(verticies.data() + start, drawcallVerts, 3 * sizeof(Vertex3D));
+        });
 
-            if (verts != nullptr) {
-                memcpy(verticies.data() + cpyIndex, verts, lineVertexCount * sizeof(Vertex3D));
-                delete[] verts; //prevent memory leak
-                cpyIndex += lineVertexCount;
-            }
-        }
+        std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
+            auto linecallVerts = face.GetFaceLineCallVerticies();
+            auto start = cpyIndex.fetch_add(6);
+            memcpy(verticies.data() + start, linecallVerts, 6 * sizeof(Vertex3D));
+        });
 
-        if (!sceneVertexBuffer || sceneVertexBufferSize < vertexDataSize) {
+        // for (auto &object: nonFrustrumCulledObjects) {
+        //     const int lineVertexCount = 2 * getMeshDrawCallVerticies(object.mesh);
+        //     Vertex3D *verts = object.GetObjectLineVerticies();
+        //
+        //     if (verts != nullptr) {
+        //         memcpy(verticies.data() + cpyIndex, verts, lineVertexCount * sizeof(Vertex3D));
+        //         delete[] verts; //prevent memory leak
+        //         cpyIndex += lineVertexCount;
+        //     }
+        // }
+
+        if (sceneVertexBuffer != nullptr || sceneVertexBufferSize < vertexDataSize) {
             if (sceneVertexBuffer) {
                 SDL_ReleaseGPUBuffer(m_gpuDevice.get(), sceneVertexBuffer);
             }
@@ -1252,13 +1315,21 @@ SDL_AppResult App::OnRender() {
 
     //Acquire the swapchain texture for rendering
     SDL_GPUTexture *swapchainTexture;
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)) {
+    if
+    (
+        !
+        SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)
+    ) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not acquire swapchain texture: %s", SDL_GetError());
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
     }
 
-    if (swapchainTexture == nullptr) {
+    if
+    (swapchainTexture
+     ==
+     nullptr
+    ) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Swapchain texture is null");
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
@@ -1266,22 +1337,51 @@ SDL_AppResult App::OnRender() {
 
     //Set up the colour target info for the render pass
     SDL_GPUColorTargetInfo colorTargetInfo = {};
-    colorTargetInfo.texture = swapchainTexture;
-    colorTargetInfo.clear_color = (SDL_FColor){0.1f, 0.1f, 0.2f, 1.0f}; // dark blue-grey
-    colorTargetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
-    colorTargetInfo.store_op = SDL_GPU_STOREOP_STORE;
+    colorTargetInfo
+            .
+            texture = swapchainTexture;
+    colorTargetInfo
+            .
+            clear_color =
+            (SDL_FColor){0.1f, 0.1f, 0.2f, 1.0f}; // dark blue-grey
+    colorTargetInfo
+            .
+            load_op = SDL_GPU_LOADOP_CLEAR;
+    colorTargetInfo
+            .
+            store_op = SDL_GPU_STOREOP_STORE;
 
     SDL_GPUDepthStencilTargetInfo depthTarget = {};
-    depthTarget.texture = this->depthTexture;
-    depthTarget.clear_depth = 1.0f; // far plane value
-    depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
-    depthTarget.store_op = SDL_GPU_STOREOP_STORE;
-    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget
+            .
+            texture =
+            this
+            ->
+            depthTexture;
+    depthTarget
+            .
+            clear_depth =
+            1.0f; // far plane value
+    depthTarget
+            .
+            load_op = SDL_GPU_LOADOP_CLEAR;
+    depthTarget
+            .
+            store_op = SDL_GPU_STOREOP_STORE;
+    depthTarget
+            .
+            stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    depthTarget
+            .
+            stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 
     //Begin render pass
     SDL_GPURenderPass *renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorTargetInfo, 1, &depthTarget);
-    if (renderPass == nullptr) {
+    if
+    (renderPass
+     ==
+     nullptr
+    ) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to begin render pass");
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
@@ -1290,7 +1390,15 @@ SDL_AppResult App::OnRender() {
     SDL_GPUViewport viewport = {0, 0, (float) defaultScreenWidth, (float) defaultScreenHeight, 0.0f, 1.0f};
     SDL_SetGPUViewport(renderPass, &viewport);
 
-    if (totalUploadedVertexNumber > 0 && sceneVertexBuffer != nullptr) {
+    if
+    (totalUploadedVertexNumber
+     >
+     0
+     &&
+     sceneVertexBuffer
+     !=
+     nullptr
+    ) {
         SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
 
         //Bind our vertex buffer/s
@@ -1311,10 +1419,15 @@ SDL_AppResult App::OnRender() {
 
     SDL_EndGPURenderPass(renderPass);
 
-    if (!SDL_SubmitGPUCommandBuffer(commandBuffer)) {
+    if
+    (
+        !
+        SDL_SubmitGPUCommandBuffer(commandBuffer)
+    ) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to submit command buffer: %s", SDL_GetError());
         return FAILURE;
     }
 
-    return CONTINUE;
+    return
+            CONTINUE;
 }
