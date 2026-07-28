@@ -46,7 +46,7 @@ public:
 
     Mesh *mesh;
     Vector Position;
-    
+
     Matrix3D rotationMatrix3D{};
 
     Vector acceleration{};
@@ -108,6 +108,7 @@ public:
     //     );
     // }
 
+    /*
     Vertex3D *GetObjectMeshDrawCallVerticies() const {
         auto chooseFaceTangent = [](const Vector &normal) {
             const float absX = std::fabs(normal.x);
@@ -280,6 +281,7 @@ public:
 
         return lineVertices;
     }
+    */
 
     void AddForceAcceleration(Vector force);
 

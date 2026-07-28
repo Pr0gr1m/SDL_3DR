@@ -17,7 +17,7 @@ public:
     Face(Matrix3D rotationMatrix, Vector globalPoint1, Vector globalPoint2, Vector globalPoint3) : rotationMatrix3D(rotationMatrix), globalPoint1(globalPoint1), globalPoint2(globalPoint2), globalPoint3(globalPoint3) {
     }
 
-    const Vertex3D *GetFaceDrawCallVerticies() {
+    const std::array<Vertex3D, 3> GetFaceDrawCallVerticies() {
         auto chooseFaceTangent = [](const Vector &normal) {
             const float absX = std::fabs(normal.x);
             const float absY = std::fabs(normal.y);
@@ -35,7 +35,7 @@ public:
         };
 
         auto chooseFaceUV = [](const Vector &point, const Vector &normal) {
-            const float absX = std::fabs(normal.x); //abs for float vars
+            const float absX = std::fabs(normal.x); //abs for float
             const float absY = std::fabs(normal.y);
             const float absZ = std::fabs(normal.z);
 
@@ -51,8 +51,8 @@ public:
             return std::pair<float, float>{point.x + UVOffset, point.y + UVOffset};
         };
 
-        Vertex3D *verticies = new Vertex3D[3]{};
-        std::array<Vector, 3> globalPoints = {globalPoint1, globalPoint2, globalPoint3};
+        // Vertex3D *verticies = new Vertex3D[3]{};
+        std::array<Vertex3D, 3> verticies = {};
 
         auto v1 = globalPoint1;
         auto v2 = globalPoint2;
@@ -61,6 +61,7 @@ public:
         auto rv1 = rotationMatrix3D.Multiply(v1);
         auto rv2 = rotationMatrix3D.Multiply(v2);
         auto rv3 = rotationMatrix3D.Multiply(v3);
+        
         auto localFaceNormal = (v2 - v1).Cross(v3 - v1).Normalized();
 
         const Vector localFaceCenter = (v1 + v2 + v3) / 3.f;
@@ -201,8 +202,9 @@ public:
         // return verticies;
     }
 
-    const Vertex3D *GetFaceLineCallVerticies() {
-        auto *lineVertices = new Vertex3D[6];
+    const std::array<Vertex3D, 6> GetFaceLineCallVerticies() {
+        // auto *lineVertices = new Vertex3D[6];
+        std::array<Vertex3D, 6> lineVertices = {};
 
         SDL_FColor color{1.f, 1.f, 1.f, .225f};
         for (int i = 0; i < 6; i++) {

@@ -746,6 +746,9 @@ bool App::UploadDirtTexturesToGPU() {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_CreateGPUTexture failed");
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_DestroySurface(convertedColourSurface);
+        SDL_DestroySurface(convertedNormalSurface);
         return false;
     }
 
@@ -776,6 +779,9 @@ bool App::UploadDirtTexturesToGPU() {
 
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+
+        SDL_DestroySurface(convertedColourSurface);
+        SDL_DestroySurface(convertedNormalSurface);
         return false;
     }
 
@@ -794,6 +800,8 @@ bool App::UploadDirtTexturesToGPU() {
 
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), colourTexture);
         SDL_ReleaseGPUTexture(m_gpuDevice.get(), normalTexture);
+        SDL_DestroySurface(convertedColourSurface);
+        SDL_DestroySurface(convertedNormalSurface);
         return false;
     }
 
@@ -814,6 +822,9 @@ bool App::UploadDirtTexturesToGPU() {
                    normalSourcePixels + (y * convertedNormalSurface->pitch),
                    normalBytesPerRow);
     }
+
+    SDL_DestroySurface(convertedColourSurface);
+    SDL_DestroySurface(convertedNormalSurface);
 
     SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), colourTransferBuffer);
     SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), normalTransferBuffer);
@@ -1119,7 +1130,6 @@ SDL_AppResult App::OnRender() {
     //     }
     //     return true;
     // };
-
     // auto isMeshInCamerFrustrum = [](Mesh *mesh, Vector objPosition) {
     //     if (mesh->numVerticies == 0) return false;
     //
@@ -1135,7 +1145,7 @@ SDL_AppResult App::OnRender() {
     //             }
     //         }
     //         if (allOutside) {
-    //             return false; // completely outside this plane → cull
+    //             return false; // completely outside this plane cull
     //         }
     //     }
     //     return true;
@@ -1151,13 +1161,9 @@ SDL_AppResult App::OnRender() {
 
             //manually check 3 verticies
             float d1 = plane.A * v1.x + plane.B * v1.y + plane.C * v1.z + plane.D;
-            if (d1 >= 0.0f) { return false; }
-
             float d2 = plane.A * v2.x + plane.B * v2.y + plane.C * v2.z + plane.D;
-            if (d2 >= 0.0f) { return false; }
-
             float d3 = plane.A * v3.x + plane.B * v3.y + plane.C * v3.z + plane.D;
-            if (d3 >= 0.0f) { return false; }
+            if (d1 < 0 && d2 < 0 && d3 < 0) { return false; }
         }
         return true;
     };
@@ -1171,40 +1177,55 @@ SDL_AppResult App::OnRender() {
     std::vector<Face> nonFrustrumCulledFaces;
 
     for (auto &chunk: chunkManager->worldChunks) {
-        int iterations = 0;
         for (const auto kvp: chunk.blocks) {
-            // if (isMeshInCamerFrustrum(kvp.second.mesh, kvp.second.Position)) {
-            //     nonFrustrumCulledObjects.push_back(kvp.second);
-            //
-            //     auto drawVertexCount = getMeshDrawCallVerticies(kvp.second.mesh);
-            //     totalVertexNumber += drawVertexCount * 1;
-            //     totalLineVertexNumber += drawVertexCount * 2;
-            // }
+            // for (size_t i = 0; i < static_cast<int>(kvp.second.mesh->numVerticies / 3); i += 1) {
+            // Vector v1 = kvp.second.Position + kvp.second.mesh->verticies[0 + (i * 3)];
+            // Vector v2 = kvp.second.Position + kvp.second.mesh->verticies[1 + (i * 3)];
+            // Vector v3 = kvp.second.Position + kvp.second.mesh->verticies[2 + (i * 3)];
+            for (size_t i = 0; i < kvp.second.mesh->numTriangles; i += 1) {
+                Int3 triangle = kvp.second.mesh->triangles[i];
 
-            Vector v1 = kvp.second.rotationMatrix3D.Multiply(kvp.second.Position + kvp.second.mesh->verticies[0 + iterations * 3]);
-            Vector v2 = kvp.second.rotationMatrix3D.Multiply(kvp.second.Position + kvp.second.mesh->verticies[1 + iterations * 3]);
-            Vector v3 = kvp.second.rotationMatrix3D.Multiply(kvp.second.Position + kvp.second.mesh->verticies[2 + iterations * 3]);
+                Vector v1 = kvp.second.Position + kvp.second.mesh->verticies[triangle.a];
+                Vector v2 = kvp.second.Position + kvp.second.mesh->verticies[triangle.b];
+                Vector v3 = kvp.second.Position + kvp.second.mesh->verticies[triangle.c];
 
-            Face face{kvp.second.rotationMatrix3D, v1, v2, v3};
+                Face face{kvp.second.rotationMatrix3D, v1, v2, v3};
 
-            if (isFaceInCameraFrustrum(&face)) {
-                // nonFrustrumCulledObjects.push_back(kvp.second);
-                nonFrustrumCulledFaces.push_back(face);
+                if (isFaceInCameraFrustrum(&face)) {
+                    // nonFrustrumCulledObjects.push_back(kvp.second);
+                    nonFrustrumCulledFaces.push_back(face);
 
-                totalVertexNumber += 3;
-                totalLineVertexNumber += 3 * 2;
+                    totalVertexNumber += 3;
+                    totalLineVertexNumber += 3 * 2;
+                }
             }
-
-            iterations++;
         }
     }
 
     auto endTicks = SDL_GetTicksNS();
 
-    SDL_Log("Frustrum culling took: %f ms...", (endTicks - startTicks) / 1000000.f);
-    SDL_Log("Num of verticies total: %i", totalVertexNumber);
+    SDL_Log(
+        "Frustrum culling took: %f ms..."
+        ,
+        (endTicks
+         -
+         startTicks
+        )
+        /
+        1000000.f
+    );
 
-    if (deltaTimeMS == 0) {
+    SDL_Log(
+        "Num of verticies total: %i"
+        ,
+        totalVertexNumber
+    );
+
+    if
+    (deltaTimeMS
+     ==
+     0
+    ) {
         SDL_Log("FPS: 0 (0DMS)");
     } else {
         SDL_Log("FPS: %i", 1000 / deltaTimeMS);
@@ -1215,7 +1236,11 @@ SDL_AppResult App::OnRender() {
     std::vector<Vertex3D> verticies(totalUploadedVertexNumber);
 
     const Uint32 vertexDataSize = totalUploadedVertexNumber * sizeof(Vertex3D);
-    if (vertexDataSize > 0) {
+    if
+    (vertexDataSize
+     >
+     0
+    ) {
         // int cpyIndex = 0;
         // for (auto &object: nonFrustrumCulledObjects) {
         //     const int drawVertexCount = getMeshDrawCallVerticies(object.mesh);
@@ -1238,13 +1263,13 @@ SDL_AppResult App::OnRender() {
         std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
             auto drawcallVerts = face.GetFaceDrawCallVerticies();
             auto start = cpyIndex.fetch_add(3);
-            memcpy(verticies.data() + start, drawcallVerts, 3 * sizeof(Vertex3D));
+            memcpy(verticies.data() + start, drawcallVerts.data(), 3 * sizeof(Vertex3D));
         });
 
         std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
             auto linecallVerts = face.GetFaceLineCallVerticies();
             auto start = cpyIndex.fetch_add(6);
-            memcpy(verticies.data() + start, linecallVerts, 6 * sizeof(Vertex3D));
+            memcpy(verticies.data() + start, linecallVerts.data(), 6 * sizeof(Vertex3D));
         });
 
         // for (auto &object: nonFrustrumCulledObjects) {
@@ -1317,6 +1342,8 @@ SDL_AppResult App::OnRender() {
     SDL_GPUTexture *swapchainTexture;
     if
     (
+
+
         !
         SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)
     ) {
@@ -1421,6 +1448,8 @@ SDL_AppResult App::OnRender() {
 
     if
     (
+
+
         !
         SDL_SubmitGPUCommandBuffer(commandBuffer)
     ) {
