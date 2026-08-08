@@ -41,14 +41,14 @@ public:
      * @param localPathTo local (from base path) path to the file
      * @return Converted surface
      */
-    SDL_Surface *lodSurfaceFromTexture(const char *localPathTo);
+    SDL_Surface *loadSurfaceFromTexture(const char *localPathTo);
 
     /**
      * Loads the file and returns the surface in pixel format RGBA32
      * @return
      */
 
-    SDL_Surface *lodSurfaceFromTexture(BlockType, TextureType);
+    SDL_Surface *loadSurfaceFromTexture(BlockType, TextureType);
 
     void AddEntryForBlockType(BlockType, const std::string &);
 

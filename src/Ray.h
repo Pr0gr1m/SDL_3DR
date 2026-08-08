@@ -10,12 +10,13 @@ struct Ray {
 struct RaycastHit {
     bool hit = false;
     bool blockType = false; //mentioned in App::ConstructChunkAt
-    Vector blockPosition;
+    Vector blockPosition{};
 };
 
 #ifndef RaycastHit_NULL_H
 #define RaycastHit_NULL_H RaycastHit_NULL
-static RaycastHit RaycastHit_NULL{false, false, Vector(0, 0, 0)};
+inline extern const RaycastHit RaycastHit_NULL{};
+// extern RaycastHit RaycastHit_NULL{false, false, Vector(0, 0, 0)};
 #endif
 
 #endif //SDL1_RAY_H

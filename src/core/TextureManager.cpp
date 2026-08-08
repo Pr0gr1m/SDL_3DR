@@ -2,7 +2,7 @@
 
 #include "../App.h"
 
-SDL_Surface *TextureManager::lodSurfaceFromTexture(const char *localPathTo) {
+SDL_Surface *TextureManager::loadSurfaceFromTexture(const char *localPathTo) {
     std::string fullPath = std::string(basePath) + localPathTo;
     SDL_Log("Loading texture: %s", fullPath.c_str());
 
@@ -33,7 +33,7 @@ SDL_Surface *TextureManager::lodSurfaceFromTexture(const char *localPathTo) {
     return convertedTextureSurface;
 }
 
-SDL_Surface *TextureManager::lodSurfaceFromTexture(BlockType blockType, TextureType textureType) {
+SDL_Surface *TextureManager::loadSurfaceFromTexture(BlockType blockType, TextureType textureType) {
     std::string selectBlockPath = this->blockTypeToPath[blockType];
     std::string selectTexturePath = this->textureTypeToPath.at(textureType); //with const maps only at can be used
 
@@ -49,7 +49,7 @@ SDL_Surface *TextureManager::lodSurfaceFromTexture(BlockType blockType, TextureT
 
     std::string fullLocalPath = selectBlockPath + selectTexturePath + ".jpg";
 
-    return this->lodSurfaceFromTexture(fullLocalPath.c_str());
+    return this->loadSurfaceFromTexture(fullLocalPath.c_str());
 }
 
 void TextureManager::AddEntryForBlockType(BlockType blockType, const std::string &localPathTo) {

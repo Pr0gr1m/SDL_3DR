@@ -48,8 +48,8 @@ private:
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> m_Window;
     std::unique_ptr<SDL_GPUDevice, decltype(&SDL_DestroyGPUDevice)> m_gpuDevice;
 
-    ChunkManager *chunkManager;
-    TextureManager *textureManager;
+    std::unique_ptr<ChunkManager> chunkManager;
+    std::unique_ptr<TextureManager> textureManager;
 
     Vector cubeVerticies[8] =
     {
@@ -72,7 +72,7 @@ private:
         {4, 7, 6}, {4, 6, 5}
     };
 
-    Mesh *cubeMesh{};
+    std::unique_ptr<Mesh> cubeMesh{};
 
     static SDL_AppResult OnQuit();
 
@@ -86,11 +86,20 @@ private:
 
     bool isPointInsideCameraFrustrumView(Vector);
 
+    int GetLevelOfDetailFromDistance(float distance) {
+        auto LOD = static_cast<int>(1.2f * std::ceil(distance / ChunkManager::chunkSizeXYZ));
+        if (LOD <= 0) return 1;
+        if (LOD > ChunkManager::chunkSizeXYZ) return ChunkManager::chunkSizeXYZ;
+        return LOD - 1;
+    }
+
     RaycastHit CheckIsPointInsideAny(Vector) const;
 
     RaycastHit RaycastRay(Vector, Vector, float maxDistance = 1) const;
 
     SDL_GPUBuffer *sceneVertexBuffer = nullptr;
+    size_t lastSceneVertexBufferDataSize = 0;
+
     Uint32 sceneVertexBufferSize = 0;
     SDL_GPUGraphicsPipeline *graphicsPipeline = nullptr;
     SDL_GPUGraphicsPipeline *lineGraphicsPipeline = nullptr;

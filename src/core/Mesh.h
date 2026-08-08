@@ -11,7 +11,12 @@
 struct Face {
 public:
     Vector globalPoint1, globalPoint2, globalPoint3{};
-    Matrix3D rotationMatrix3D;
+    Matrix3D rotationMatrix3D{Matrix3D::Identity()};
+
+    Face() = default;
+
+    Face(Vector globalPoint1, Vector globalPoint2, Vector globalPoint3) : globalPoint1(globalPoint1), globalPoint2(globalPoint2), globalPoint3(globalPoint3) {
+    }
 
     ///Not rotated, points in world space of a face of an object
     Face(Matrix3D rotationMatrix, Vector globalPoint1, Vector globalPoint2, Vector globalPoint3) : rotationMatrix3D(rotationMatrix), globalPoint1(globalPoint1), globalPoint2(globalPoint2), globalPoint3(globalPoint3) {
@@ -61,7 +66,7 @@ public:
         auto rv1 = rotationMatrix3D.Multiply(v1);
         auto rv2 = rotationMatrix3D.Multiply(v2);
         auto rv3 = rotationMatrix3D.Multiply(v3);
-        
+
         auto localFaceNormal = (v2 - v1).Cross(v3 - v1).Normalized();
 
         const Vector localFaceCenter = (v1 + v2 + v3) / 3.f;
@@ -203,8 +208,13 @@ public:
     }
 
     const std::array<Vertex3D, 6> GetFaceLineCallVerticies() {
-        // auto *lineVertices = new Vertex3D[6];
         std::array<Vertex3D, 6> lineVertices = {};
+
+        const Vector transformed[3] = {
+            rotationMatrix3D.Multiply(globalPoint1),
+            rotationMatrix3D.Multiply(globalPoint2),
+            rotationMatrix3D.Multiply(globalPoint3)
+        };
 
         SDL_FColor color{1.f, 1.f, 1.f, .225f};
         for (int i = 0; i < 6; i++) {
@@ -216,7 +226,22 @@ public:
             lineVertices[i].TexCoordV = 0.f;
         }
 
+        lineVertices[0].Position = rotationMatrix3D.Multiply(globalPoint1);
+        lineVertices[1].Position = rotationMatrix3D.Multiply(globalPoint1);
+        lineVertices[2].Position = rotationMatrix3D.Multiply(globalPoint2);
+        lineVertices[3].Position = rotationMatrix3D.Multiply(globalPoint2);
+        lineVertices[4].Position = rotationMatrix3D.Multiply(globalPoint3);
+        lineVertices[5].Position = rotationMatrix3D.Multiply(globalPoint3);
+
         return lineVertices;
+    }
+
+    Face &operator+=(const Vector &vector) {
+        globalPoint1 += vector;
+        globalPoint2 += vector;
+        globalPoint3 += vector;
+
+        return *this;
     }
 
     // Vertex3D *GetObjectLineVerticies() const {
@@ -286,8 +311,8 @@ public:
 class Mesh {
 public:
     ~Mesh() {
-        delete verticies;
-        delete triangles;
+        // delete verticies;
+        // delete triangles;
     }
 
     Vector *verticies = nullptr;
