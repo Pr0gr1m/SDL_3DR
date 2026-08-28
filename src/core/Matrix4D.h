@@ -1,9 +1,8 @@
 #ifndef SDL1_MATRIX4D_H
 #define SDL1_MATRIX4D_H
 
-#define F2STRING(Value) #Value
-
 #include <string>
+#include "../GlobalVariables.h"
 
 /* STRUCTURE OF M2D:
 x0 x1 x2 x3
@@ -12,6 +11,10 @@ z0 z1 z2 z3
 j0 j1 j2 j3
 */
 
+/**
+ *@class Matrix4D
+ *@brief A 4x4 matrix
+*/
 class Matrix4D {
 public:
     float x0{}, y0{}, z0{}, j0{};
@@ -24,7 +27,8 @@ public:
     Matrix4D(float x0, float y0, float z0, float j0, float x1, float y1, float z1, float j1, float x2, float y2, float z2, float j2, float x3, float y3, float z3, float j3)
         : x0(x0), y0(y0), z0(z0), j0(j0), x1(x1), y1(y1), z1(z1), j1(j1), x2(x2), y2(y2), z2(z2), j2(j2), x3(x3), y3(y3), z3(z3), j3(j3) {
     }
-    
+
+    ///Changes parameters values to be the same as in the matrix
     void toOutFloat16Array(float out[16]) const {
         out[0] = x0;
         out[1] = y0;

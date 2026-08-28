@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.2)
+cmake_minimum_required(VERSION 3.20)
 project(SDL1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
@@ -21,12 +21,17 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/core/Chunk.h
         src/core/noise/SimplexNoise.cpp
         src/core/noise/SimplexNoise.h
-        src/Ray.h
-        src/core/ChunkManager.cpp
+        src/core/Ray.h
         src/core/ChunkManager.h
         src/core/TextureManager.cpp
         src/core/TextureManager.h
+        src/core/ShaderHelper.h
+        src/core/Face.cpp
+        src/core/Face.h
+        src/GlobalVariables.h
 )
+
+target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)
 
 find_package(SDL3 CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE SDL3::SDL3)

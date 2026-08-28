@@ -10,48 +10,18 @@
 #include "Matrix4D.h"
 #include "Object.h"
 
+// constexpr float DEG_2_RAD = M_PI / 180.0f;
+
+/**
+ *@class Camera
+ *@brief A class representing a player camera
+ */
 class Camera {
 public:
-    Camera() {
-        UpdateDirectionVectors();
-    }
-
-    ~Camera() {
-    }
-
-    Vector Position = Vector(0, 0, 0);
-    float pitch{}, yaw{}, roll{};
-
-    Vector worldUp = Vector(0, 1, 0);
-    Vector forward; //Default : (0,0,-1)
-    Vector right;
-    Vector up;
-
-    // Vector frustrumPlanes[6];
-    // Vector frustrumCorners[8];
-
-    //or plane normal * any point + distance/offset from origin = 0
-    //Ax + By + Cz + D = 0
-    struct FrustrumPlane {
-        // Vector planeNormal;
-        // float originDistance;
-        //
-        // float DistanceToPoint(const Vector &p) const {
-        //     return planeNormal.Dot(p) + originDistance;
-        // }
-        float A;
-        float B;
-        float C;
-        float D;
-    };
-
-    std::array<FrustrumPlane, 6> frustrumPlanes;
-    std::array<Vector, 8> frustrumCorners;
-
-    Camera(float p, float y, float r) : pitch(p), yaw(y), roll(r) {
-        UpdateDirectionVectors();
-    }
-
+    /**
+     *@enum MoveStates
+     *@brief Enum representing all possible player move states
+     */
     enum MoveStates {
         Forward,
         Backward,
@@ -59,22 +29,74 @@ public:
         Right,
         Up,
         Down,
-        None //Should be last, makes it possible to know num of elements static_cast<int>(Example::None)
     };
 
+    Camera() {
+        UpdateDirectionVectors();
+    }
+
+    ~Camera() = default;
+
+    ///Camera's current position
+    Vector Position = Vector(0, 0, 0);
+
+    ///Camera's pitch, yaw and roll
+    float pitch{}, yaw{}, roll{};
+
+    ///World up
+    Vector worldUp = Vector(0, 1, 0);
+    ///Camera's local forward in global space
+    Vector forward;
+    ///Camera's local right in global space
+    Vector right;
+    ///Camera's local up in global space
+    Vector up;
+
+    ///Map of all move states
     std::map<MoveStates, bool> currentMoveStates;
 
+    ///Camera's FOV
     float fovY = 80;
+    ///Camera's near plane distance
     float near = 0.1f;
+    ///Camera's far plane distance
     float far = 100.f;
 
-    const float DEG_2_RAD = M_PI / 180.0f;
-
+    ///Aspect ratio
     float aspect = 1;
+
+    ///Last frame's delta time
     Uint64 deltaTimeMS{};
 
+    ///Current camera velocity
+    Vector cameraVelocity = Vector(0, 0, 0);
+
+    ///Camera's mass, only divides force when adding it to velocity
+    double cameraMass = 10.00;
+
+    //or plane normal * any point + distance/offset from origin = 0
+
+    /**
+     *@struct FrustrumPlane
+     *@brief Trivial struct representing camera's frustrum plane as equation: Ax + By + Cz + D = 0
+    */
+    struct FrustrumPlane {
+        float A;
+        float B;
+        float C;
+        float D;
+    };
+
+    ///Camera's frustrum planes
+    std::array<FrustrumPlane, 6> frustrumPlanes{};
+    ///Camera's frustrum corners
+    std::array<Vector, 8> frustrumCorners;
+
+    Camera(float p, float y, float r) : pitch(p), yaw(y), roll(r) {
+        UpdateDirectionVectors();
+    }
+
     Camera(Vector positon, float pitch, float yaw, float roll) : Position(positon), pitch(pitch), yaw(yaw), roll(roll) {
-        //currentMoveStates = std::vector<std::pair<MoveStates, bool> >(static_cast<int>(MoveStates::None));
         currentMoveStates = std::map<MoveStates, bool>();
         UpdateDirectionVectors();
     };
@@ -84,25 +106,62 @@ public:
         UpdateDirectionVectors();
     };
 
-    Vector cameraVelocity = Vector(0, 0, 0);
-    double cameraMass = 10.00;
+    /**
+     *Sets a selected move state to a flag
+     *@param state Selected move state
+     *@param flag Flag
+     */
+    void SetMoveState(MoveStates state, bool flag);
 
-    void SetMoveState(MoveStates, bool);
+    /**
+     *Returns whether a move state is active or not
+     *@param state Selected move state
+     *@returns State of the selected state
+     */
+    bool GetMoveState(MoveStates state);
 
-    bool GetMoveState(MoveStates);
+    ///Adds a normalized force with the force
 
-    void AddForceThisTick(Vector, float);
+    /**
+     *Adds a normalized force with a magnitude to a camera velocity
+     *@param force Normalized force vector
+     *@param magnitude Force vector magnitude
+     */
+    void AddForceThisTick(Vector force, float magnitude);
 
-    void AddForceThisTick(Vector);
+    ///Adds a force
 
+    /**
+     *Adds a force to a camera velocity
+     *@param force Force vector
+     */
+    void AddForceThisTick(Vector force);
+
+    /**
+     *Updates camera's poisition based on its current velocity
+     */
     void MoveCameraBasedOnVelocity();
 
-    ///Returns 8 vector points
+    ///Returns 8 vector points representing camera's frustrum's corners
+
+    /**
+     *Updates camera's frustrum planes and their corners
+     */
     void UpdateCameraFrustrumCorners();
 
-    bool IsPointInFrustum(const Vector &point) const;
+    ///Returns whether a point is inside (true) or outside (false) every camera's frustrum plane
+    /**
+     *Checks if point is on the same side of every frustrum plane
+     *@param point Global point to check
+     *@returns If the point is inside every frustrum plane it returns true, otherwise false
+     */
+    [[nodiscard]] bool IsPointInFrustum(const Vector &point) const;
 
-    Matrix4D GetViewMatrix() const {
+    /**
+     *Returns camera's view 4x4 matrix
+     *@returns Camera's view matrix
+     */
+    [[nodiscard]] Matrix4D GetViewMatrix() const {
         return Matrix4D(
             right.x, right.y, right.z, -Position.Dot(right),
             up.x, up.y, up.z, -Position.Dot(up),
@@ -111,10 +170,14 @@ public:
         );
     }
 
-    Matrix4D GetProjectionMatrix() const {
+    /**
+      *Returns camera's projection 4x4 matrix
+      *@returns Camera's view matrix
+      */
+    [[nodiscard]] Matrix4D GetProjectionMatrix() const {
         float fovRad = fovY * DEG_2_RAD;
         float f = 1.0f / tan(fovRad / 2.0f);
-        
+
         float safeAspect = (aspect == 0.f) ? 1.f : aspect;
         float zRange = near - far;
         if (zRange == 0.f) zRange = -0.001f;
@@ -128,17 +191,18 @@ public:
         );
     }
 
-    void UpdateDirectionVectors() {
-        float yawRad = yaw * DEG_2_RAD;
-        float pitchRad = pitch * DEG_2_RAD;
+    /**
+     *Updates cameras direction vectors
+     */
+    void UpdateDirectionVectors();
 
-        forward = Vector(cos(pitchRad) * sin(yawRad), sin(pitchRad), -cos(pitchRad) * cos(yawRad)).Normalized();
-        right = forward.Cross(worldUp).Normalized();
-        up = right.Cross(forward).Normalized();
-    }
-
-    void ResetVelocityAlongWorldAxis(Vector);
+    /**
+     *Resets camera velocity with 0 values in a specific axis if same parameters axis is greater than 0
+     *@param axis Axis
+     */
+    void ResetVelocityAlongWorldAxis(Vector axis);
 };
 
 
 #endif //SDL1_CAMERA_H
+

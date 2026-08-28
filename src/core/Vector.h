@@ -5,6 +5,10 @@
 
 class Int3;
 
+/**
+ *@class Vector
+ *@brief Trivial vector class containing 3 floats
+ */
 class Vector {
 public:
     Vector() = default;
@@ -20,16 +24,22 @@ public:
     Vector(float x, float y, float z) : x(x), y(y), z(z) {
     }
 
+    ///Returns an Int3 containing Vector's fields as integers
     Int3 toInt3() const;
 
+    ///Returns magnitude of the vector
     float Magnitude() const;
 
+    ///Returns new vector with the same fields divided by magnitude
     Vector Normalized() const;
 
+    ///Negates every field
     Vector Negated() const;
 
+    ///Returns a cross vector from this and the parameter vector
     Vector Cross(const Vector &) const;
 
+    ///Returns a dot product from this and the parameter vector
     float Dot(const Vector &) const;
 
     bool operator==(const Vector &vector) const {
@@ -82,14 +92,6 @@ public:
         this->z *= vector.z;
         return *this;
     }
-
-    Vector CrossProduct(const Vector &a, const Vector &b) {
-        return {
-            a.y * b.z - a.z * b.y,
-            a.z * b.x - a.x * b.z,
-            a.x * b.y - a.y * b.x
-        };
-    }
 };
 
 inline float Vector::Magnitude() const {
@@ -120,12 +122,5 @@ inline Vector Vector::Cross(const Vector &other) const {
 inline float Vector::Dot(const Vector &other) const {
     return x * other.x + y * other.y + z * other.z;
 }
-
-// Vector operator*(int lhs, const Vector &rhs) {
-//     return Vector(lhs * rhs.x, lhs * rhs.y, lhs * rhs.z);
-// }
-
-//After decleration?
-
 
 #endif //SDL1_VECTOR_H

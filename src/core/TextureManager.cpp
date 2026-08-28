@@ -1,6 +1,6 @@
 #include "TextureManager.h"
-
-#include "../App.h"
+#include <SDL3_image/SDL_image.h>
+#include "../GlobalVariables.h"
 
 SDL_Surface *TextureManager::loadSurfaceFromTexture(const char *localPathTo) {
     std::string fullPath = std::string(basePath) + localPathTo;
@@ -9,7 +9,7 @@ SDL_Surface *TextureManager::loadSurfaceFromTexture(const char *localPathTo) {
     SDL_IOStream *textureStream = SDL_IOFromFile(fullPath.c_str(), "rb");
 
     if (textureStream == nullptr) {
-        SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s", fullPath.c_str());
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not open texture: %s", fullPath.c_str());
         return nullptr;
     }
 
@@ -17,7 +17,7 @@ SDL_Surface *TextureManager::loadSurfaceFromTexture(const char *localPathTo) {
     SDL_CloseIO(textureStream);
 
     if (textureSurface == nullptr) {
-        SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "IMG_LoadJPG_IO failed: %s", SDL_GetError());
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "IMG_LoadJPG_IO failed: %s", SDL_GetError());
         return nullptr;
     }
 
@@ -26,7 +26,7 @@ SDL_Surface *TextureManager::loadSurfaceFromTexture(const char *localPathTo) {
     SDL_DestroySurface(textureSurface);
 
     if (convertedTextureSurface == nullptr) {
-        SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "SDL_ConvertSurface failed: %s", SDL_GetError());
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "SDL_ConvertSurface failed: %s", SDL_GetError());
         return nullptr;
     }
 
@@ -38,12 +38,12 @@ SDL_Surface *TextureManager::loadSurfaceFromTexture(BlockType blockType, Texture
     std::string selectTexturePath = this->textureTypeToPath.at(textureType); //with const maps only at can be used
 
     if (selectBlockPath.empty()) {
-        SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "No path to texture for block type %d", blockType);
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "No path to texture for block type %d", blockType);
         return nullptr;
     }
 
     if (selectTexturePath.empty()) {
-        SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "No path to texture for texture type %d", textureType);
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "No path to texture for texture type %d", textureType);
         return nullptr;
     }
 
@@ -54,7 +54,7 @@ SDL_Surface *TextureManager::loadSurfaceFromTexture(BlockType blockType, Texture
 
 void TextureManager::AddEntryForBlockType(BlockType blockType, const std::string &localPathTo) {
     if (this->blockTypeToPath.contains(blockType)) {
-        SDL_LogError(App::APP_LOG_CATEGORY_GENERIC, "Block type %d already has a path", blockType);
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Block type %d already has a path", blockType);
     }
 
     this->blockTypeToPath[blockType] = localPathTo;

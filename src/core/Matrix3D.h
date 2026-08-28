@@ -3,11 +3,16 @@
 
 #include "Vector.h"
 
-/* STRUCTURE OF M2D:
-x0 x1
-y0 y1
+/* STRUCTURE OF M3D:
+x0 x1 x2
+y0 y1 y2
+z0 z1 z2
 */
 
+/**
+ *@class Matrix3D
+ *@brief A 3x3 matrix
+*/
 class Matrix3D {
 public:
     float x0{}, y0{}, z0{};
@@ -19,6 +24,7 @@ public:
 
     Matrix3D() = default;
 
+    ///Returns a vector resulting in multiplication of the matrix by vector (or vice versa)
     Vector Multiply(Vector src) const {
         float a = (x0 * src.x) + (y0 * src.y) + (z0 * src.z);
         float b = (x1 * src.x) + (y1 * src.y) + (z1 * src.z);
@@ -27,6 +33,7 @@ public:
         return Vector(a, b, c);
     }
 
+    ///Identity matrix / NULL matrix
     static Matrix3D Identity();
 };
 

@@ -1,10 +1,8 @@
-#include <SDL3/SDL.h>
-
-SDL_Window *window;
-SDL_GPUDevice *device;
-SDL_GPUBuffer *vertexBuffer;
-SDL_GPUTransferBuffer *transferBuffer;
-SDL_GPUGraphicsPipeline *graphicsPipeline;
+// inline SDL_Window *window;
+// inline SDL_GPUDevice *device;
+// inline SDL_GPUBuffer *vertexBuffer;
+// inline SDL_GPUTransferBuffer *transferBuffer;
+// inline SDL_GPUGraphicsPipeline *graphicsPipeline;
 
 constexpr const char *kVertexShaderPath = "shaders/vertex.spv";
 constexpr const char *kFragmentShaderPath = "shaders/fragment.spv";

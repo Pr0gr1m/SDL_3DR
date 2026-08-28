@@ -2,13 +2,15 @@
 #define SDL1_OBJECT_H
 
 #include <cmath>
-#include <utility>
 
 #include "Matrix3D.h"
 #include "Mesh.h"
 #include "Vector.h"
-#include "Vertex3D.h"
 
+/**
+ *@class Object
+ *@brief Class representing a created object with a mesh e.g cube at a position
+ */
 class Object {
 public:
     Object() : mesh(nullptr), Position(0, 0, 0) {
@@ -44,16 +46,6 @@ public:
         };
     }
 
-    Mesh *mesh;
-    Vector Position;
-
-    Matrix3D rotationMatrix3D{};
-
-    Vector acceleration{};
-    Vector velocity{};
-
-    float mass = 1;
-
     Object(Mesh *mesh, Vector position, Vector rotAngle) : mesh(mesh), Position(position) {
         float alpha = rotAngle.z;
         float beta = rotAngle.y;
@@ -81,6 +73,26 @@ public:
         };
     };
 
+    ///Pointer to object's mesh
+    Mesh *mesh;
+    ///Objects world position
+    Vector Position;
+
+    ///Objects rotation matrix
+    Matrix3D rotationMatrix3D{};
+
+    ///Objects acceleration
+    Vector acceleration{};
+    ///Objects velocity
+    Vector velocity{};
+
+    ///Objects mass
+    float mass = 1;
+
+    /**
+     *Adds force divided by mass to acceleration
+     *@param force Force vector
+    */
     void AddForceAcceleration(Vector force);
 
     bool operator==(const Object &object) const {

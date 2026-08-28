@@ -1,8 +1,5 @@
 #include "Camera.h"
 
-#include <iostream>
-#include <SDL3/SDL_log.h>
-
 void Camera::SetMoveState(MoveStates state, bool flag) {
     currentMoveStates[state] = flag;
 }
@@ -86,15 +83,6 @@ void Camera::UpdateCameraFrustrumCorners() {
     fCorners[6] = Position + forwardFar - right * farPlaneXDist - up * farPlaneYDist; //bottom left
     fCorners[7] = Position + forwardFar - right * farPlaneXDist + up * farPlaneYDist; //top left
 
-    // Vector frustrumCenter = Vector(0.f, 0.f, 0.f);
-    // for (auto fCorner: fCorners) {
-    //     frustrumCenter += fCorner;
-    // }
-    // frustrumCenter *= (1 / 8.0f);
-    // for (auto &fCorner: fCorners) {
-    //     fCorner = scalePointFromCenter(fCorner, frustrumCenter, 1);
-    // }
-
     //assume a right-handed system and looking down on -Z corners are clockwise from top-right looking from camera
     //Near plane: 0, 1, 2, 3 CCW order: 3, 2, 1 (top left, bottom left, bottom right
     fPlanes[0] = convertPointsToFrustrumPlane(fCorners[3], fCorners[2], fCorners[1], Position + forward * (near + 0.1f));
@@ -113,7 +101,6 @@ void Camera::UpdateCameraFrustrumCorners() {
     this->frustrumPlanes = fPlanes;
 }
 
-[[deprecated]]
 bool Camera::IsPointInFrustum(const Vector &point) const {
     //If point lies on side of planes normal vector it is inside
 
@@ -126,6 +113,15 @@ bool Camera::IsPointInFrustum(const Vector &point) const {
     return true;
 }
 
+
+void Camera::UpdateDirectionVectors() {
+    float yawRad = yaw * DEG_2_RAD;
+    float pitchRad = pitch * DEG_2_RAD;
+
+    forward = Vector(cos(pitchRad) * sin(yawRad), sin(pitchRad), -cos(pitchRad) * cos(yawRad)).Normalized();
+    right = forward.Cross(worldUp).Normalized();
+    up = right.Cross(forward).Normalized();
+}
 
 void Camera::ResetVelocityAlongWorldAxis(Vector axis) {
     this->cameraVelocity *= Vector(axis.x > 0 ? 0 : 1, axis.y > 0 ? 0 : 1, axis.z > 0 ? 0 : 1);

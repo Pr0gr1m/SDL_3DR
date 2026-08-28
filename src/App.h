@@ -3,42 +3,52 @@
 #include <vector>
 #include <SDL3/SDL.h>
 
-#include "Ray.h"
+#include "core/Ray.h"
 #include "core/Chunk.h"
 #include "core/ChunkManager.h"
 #include "core/TextureManager.h"
 
+/**
+ * @class App
+ * @brief Main application class
+ */
 class App {
 public:
     App(int argc, char **argv);
 
+    ///Initializes application
     SDL_AppResult Init();
 
+    ///Iterates over application
     SDL_AppResult Iterate();
 
+    ///Observer on event
     SDL_AppResult Event(const SDL_Event *event);
 
+    ///Quits application
     void Quit(SDL_AppResult result) const;
 
     ~App();
 
-    void LoadOrCompileShaders() const;
-
-    enum AppLogCategory {
-        APP_LOG_CATEGORY_GENERIC = SDL_LOG_CATEGORY_APPLICATION,
-        APP_LOG_CATEGORY_VIDEO = SDL_LOG_CATEGORY_VIDEO
-    };
-
+    /**
+     * @enum ShaderBinaryFormat
+     * @brief Describes different compiled shader binaries format
+     */
     enum class ShaderBinaryFormat {
         Spirv,
         Dxil, //unused
     };
 
+    /**
+     * @struct LoadedShaderBinary
+     * @brief Describes a compiled and loaded shader binary
+     */
     struct LoadedShaderBinary {
         std::vector<std::byte> bytes;
         SDL_GPUShaderFormat sdlFormat;
     };
 
+    ///Returns a downwards vector / opposite to world up
     static Vector GetGravityVector();
 
     Uint64 deltaTimeMS; //KEEP IN MIND - NEED TO DIVIDE BY 1000 TO GET SECONDS
@@ -74,7 +84,7 @@ private:
 
     std::unique_ptr<Mesh> cubeMesh{};
 
-    static SDL_AppResult OnQuit();
+    // static SDL_AppResult OnQuit();
 
     bool UploadDirtTexturesToGPU();
 
@@ -82,7 +92,8 @@ private:
 
     SDL_AppResult OnUpdate();
 
-    void ConstructChunkAt(Vector, bool flat = false);
+    // void ConstructChunkAt(int, int, bool flat = false) const;
+    void ConstructChunkAt(Vector, bool flat = false) const;
 
     bool isPointInsideCameraFrustrumView(Vector);
 
