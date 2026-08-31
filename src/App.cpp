@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <vector>
 #include <SDL3/SDL.h>
@@ -10,6 +11,8 @@
 #include <cstring>
 #include <string>
 #include <execution>
+#include <ranges>
+#include <utility>
 
 #include "core/noise/SimplexNoise.h"
 #include "core/Vector.h"
@@ -30,7 +33,7 @@
 
 static SimplexNoise *noise;
 
-Vector startingCameraPos = Vector(0.f, 15.f, 3.f);
+Vector startingCameraPos = Vector(0.f, 15.f, 0.f);
 Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
 std::unique_ptr<Camera> sceneCamera = nullptr;
 
@@ -481,6 +484,12 @@ SDL_AppResult App::Init() {
     noise = new SimplexNoise(0.15f, 3, 0, 0);
 
     ConstructChunkAt(Vector(0, 0, 0));
+    ConstructChunkAt(Vector(16, 0, 0));
+    ConstructChunkAt(Vector(0, 0, 16));
+    ConstructChunkAt(Vector(16, 0, 16));
+    ConstructChunkAt(Vector(-16, 0, 0));
+    ConstructChunkAt(Vector(0, 0, -16));
+    ConstructChunkAt(Vector(-16, 0, -16));
 
     delete noise;
 
@@ -551,7 +560,7 @@ SDL_AppResult App::Event(const SDL_Event *event) {
             }
 
             if (event->key.key == SDLK_SPACE) {
-                auto raycastHit = RaycastRay(sceneCamera->Position, GetGravityVector().Normalized(), kCameraHeightAboveGround);
+                auto raycastHit = RaycastRay(sceneCamera->Position - Vector(0, 0.1f, 0), GetGravityVector().Normalized(), kCameraHeightAboveGround);
                 if (raycastHit.hit) {
                     sceneCamera->SetMoveState(Camera::Up, true);
                 }
@@ -594,7 +603,37 @@ SDL_AppResult App::Event(const SDL_Event *event) {
             }
 
             if (event->key.key == SDLK_E) {
-                RaycastRay(sceneCamera->Position, Vector(0, -1, 0).Normalized());
+                Vector cameraLookVector = sceneCamera->forward;
+
+                SDL_Log("Camera looking at %f,%f,%f", cameraLookVector.x, cameraLookVector.y, cameraLookVector.z);
+                auto result = RaycastRay(sceneCamera->Position, cameraLookVector.Normalized(), 5, true);
+                if (result.hit) {
+                    Vector pos = result.blockPosition;
+                    pos.y += 1;
+
+                    const int vx = static_cast<int>(std::floor(pos.x + kBlockHalfExtent));
+                    const int vy = static_cast<int>(std::floor(pos.y + kBlockHalfExtent));
+                    const int vz = static_cast<int>(std::floor(pos.z + kBlockHalfExtent));
+
+                    const int chunkX = static_cast<int>(std::floor((float) vx / ChunkManager::chunkSizeXYZ)) * ChunkManager::chunkSizeXYZ;
+                    const int chunkY = static_cast<int>(std::floor((float) vy / ChunkManager::chunkSizeXYZ) * ChunkManager::chunkSizeXYZ);
+                    const int chunkZ = static_cast<int>(std::floor((float) vz / ChunkManager::chunkSizeXYZ)) * ChunkManager::chunkSizeXYZ;
+
+                    const Int3 chunkLookup = {chunkX, chunkY, chunkZ};
+
+                    auto iterator = chunkManager->chunkMap.find(chunkLookup); //std::make_pair(chunkX, chunkZ));
+                    if (iterator != chunkManager->chunkMap.end()) {
+                        //No chunk we can create new one, but thats for later
+                        auto &chunk = chunkManager->worldChunks[iterator->second];
+
+                        SDL_Log("Adding block at %f,%f,%f", (chunk.atPosition + pos).x, (chunk.atPosition + pos).y, (chunk.atPosition + pos).z);
+                        for (int i = 0; i < 5; i += 1) {
+                            chunk.blocks.insert({pos, Object{cubeMesh.get(), chunk.atPosition + pos}});
+
+                            pos.y += 1;
+                        }
+                    }
+                }
             }
             break;
         case SDL_EVENT_MOUSE_MOTION:
@@ -1014,11 +1053,14 @@ void App::ConstructChunkAt(Vector atPos, bool flat) const {
             //min limit is -1 presumably
             for (; y >= -1; y--) {
                 chunk.blocks[Vector(x, y, z)] = {cubeMesh.get(), chunk.atPosition + Vector(x, y, z)}; //for now we have either block or no block, to be replaced w enum?
+                //chunk.blocks.insert(Object{cubeMesh.get(), chunk.atPosition + Vector(x, y, z)}); //for now we have either block or no block, to be replaced w enum?)
             }
         }
     }
 
     chunkManager->worldChunks.push_back(std::move(chunk));
+    // chunkManager->chunkMap[std::make_pair((int) atPos.x, (int) atPos.z)] = chunkManager->worldChunks.size() - 1;
+    chunkManager->chunkMap.insert({atPos.toInt3(), chunkManager->worldChunks.size() - 1});
 }
 
 // void App::ConstructChunkAt(int atXPos, int atZPos, bool flat) const {
@@ -1059,19 +1101,26 @@ void App::ConstructChunkAt(Vector atPos, bool flat) const {
 // }
 
 RaycastHit App::CheckIsPointInsideAny(Vector point) const {
-    for (auto &chunk: chunkManager->worldChunks) {
-        const Vector localPoint = point - chunk.atPosition;
+    const int vx = static_cast<int>(std::floor(point.x + kBlockHalfExtent));
+    const int vy = static_cast<int>(std::floor(point.y + kBlockHalfExtent));
+    const int vz = static_cast<int>(std::floor(point.z + kBlockHalfExtent));
+
+    const int chunkX = static_cast<int>(std::floor((float) vx / ChunkManager::chunkSizeXYZ)) * ChunkManager::chunkSizeXYZ;
+    const int chunkY = static_cast<int>(std::floor((float) vy / ChunkManager::chunkSizeXYZ) * ChunkManager::chunkSizeXYZ);
+    const int chunkZ = static_cast<int>(std::floor((float) vz / ChunkManager::chunkSizeXYZ)) * ChunkManager::chunkSizeXYZ;
+
+    const Int3 chunkLookup = {chunkX, chunkY, chunkZ};
+
+    auto iterator = chunkManager->chunkMap.find(chunkLookup); //std::make_pair(chunkX, chunkZ));
+    if (iterator != chunkManager->chunkMap.end()) {
+        const auto &chunk = chunkManager->worldChunks[iterator->second];
+        const Vector localFromChunkPoint = point - chunk.atPosition;
 
         const Vector blockPosition(
-            std::floor(localPoint.x + kBlockHalfExtent),
-            std::floor(localPoint.y + kBlockHalfExtent),
-            std::floor(localPoint.z + kBlockHalfExtent)
+            std::floor(localFromChunkPoint.x + kBlockHalfExtent),
+            std::floor(localFromChunkPoint.y + kBlockHalfExtent),
+            std::floor(localFromChunkPoint.z + kBlockHalfExtent)
         );
-
-        if (blockPosition.x < 0 || blockPosition.x >= ChunkManager::chunkSizeXYZ ||
-            blockPosition.z < 0 || blockPosition.z >= ChunkManager::chunkSizeXYZ) {
-            continue;
-        }
 
         const auto block = chunk.blocks.find(blockPosition);
         if (block != chunk.blocks.end()) {
@@ -1086,19 +1135,76 @@ RaycastHit App::CheckIsPointInsideAny(Vector point) const {
     return RaycastHit_NULL;
 }
 
-RaycastHit App::RaycastRay(Vector pos, Vector normDir, float maxDistance) const {
-    static float constexpr stepSize = 0.1f;
-    const int maxIterations = static_cast<int>(std::ceil(maxDistance / stepSize));
+///Following this: https://aaaa.sh/creatures/dda-algorithm-interactive/
+RaycastHit App::RaycastRay(Vector pos, Vector normDir, float maxDistance, bool fullDebug) const {
+    if (normDir.Magnitude() == 0.f || maxDistance < 0.f) {
+        return RaycastHit_NULL;
+    }
 
-    Ray newRay;
-    newRay.position = pos;
-    newRay.direction = normDir;
+    Vector signVector = Vector(sign(normDir.x), sign(normDir.y), sign(normDir.z));
+    Vector mapCheck = pos.floored();
 
-    for (int i = 0; i < maxIterations; i += 1) {
-        newRay.position += newRay.direction * stepSize;
-        RaycastHit hit = CheckIsPointInsideAny(newRay.position);
+    float russXSqr = 1 + (normDir.x == 0 ? 0 : (normDir.y / normDir.x) * (normDir.y / normDir.x));
+    float russYSqr = 1 + (normDir.y == 0 ? 0 : (normDir.x / normDir.y) * (normDir.y / normDir.x));
+    float russZSqr = 1 + (normDir.x == 0 ? 0 : (normDir.y / normDir.z) * (normDir.y / normDir.z));
 
-        if (hit.hit) return hit;
+    Vector rayUnitStepSize = Vector(std::sqrt(russXSqr), std::sqrt(russYSqr), std::sqrt(russZSqr)); //distBeetwenRows, distBeetwenCollumns, and z distance
+    Vector rayLength = Vector(); //distToX, distToY, distToZ
+
+    Vector rayOriginSub = pos - mapCheck;
+
+    if (normDir.x < 0) {
+        rayLength.x = rayOriginSub.x * rayUnitStepSize.x;
+    } else {
+        rayLength.x = (1 - rayOriginSub.x) * rayUnitStepSize.x;
+    }
+    if (normDir.y < 0) {
+        rayLength.y = rayOriginSub.y * rayUnitStepSize.y;
+    } else {
+        rayLength.y = (1 - rayOriginSub.y) * rayUnitStepSize.y;
+    }
+
+    if (normDir.z < 0) {
+        rayLength.z = rayOriginSub.z * rayUnitStepSize.z;
+    } else {
+        rayLength.z = (1 - rayOriginSub.z) * rayUnitStepSize.z;
+    }
+
+    if (fullDebug) {
+        SDL_Log("Raycast debug:");
+        SDL_Log("\tFrom %f,%f,%f", pos.x, pos.y, pos.z);
+        SDL_Log("\tSub pos %f,%f,%f", rayOriginSub.x, rayOriginSub.y, rayOriginSub.z);
+        SDL_Log("\tAt %f,%f,%f", normDir.x, normDir.y, normDir.z);
+        SDL_Log("\tRay unit step size %f,%f,%f", rayUnitStepSize.x, rayUnitStepSize.y, rayUnitStepSize.z);
+        SDL_Log("\tRay length %f,%f,%f", rayLength.x, rayLength.y, rayLength.z);
+        SDL_Log("%f", (normDir.x / normDir.y) * (normDir.y / normDir.x));
+    }
+
+    for (int i = 0; i < maxDistance; i += 1) {
+        if (fullDebug)
+            SDL_Log("Checking position %f,%f,%f", mapCheck.x, mapCheck.y, mapCheck.z);
+
+        RaycastHit result = CheckIsPointInsideAny(mapCheck);
+        if (result.hit) {
+            if (fullDebug) SDL_Log("Hit! At %f, %f, %f", mapCheck.x, mapCheck.y, mapCheck.z);
+            return result;
+        }
+
+        if (rayLength.x < rayLength.y) {
+            mapCheck.x += signVector.x;
+            rayLength.x += rayUnitStepSize.x;
+        } else {
+            mapCheck.y += signVector.y;
+            rayLength.y += rayUnitStepSize.y;
+        }
+
+        if (rayLength.x < rayLength.z) {
+            mapCheck.x += signVector.x;
+            rayLength.x += rayUnitStepSize.x;
+        } else {
+            mapCheck.z += signVector.z;
+            rayLength.z += rayUnitStepSize.z;
+        }
     }
 
     return RaycastHit_NULL;

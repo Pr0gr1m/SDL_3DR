@@ -92,6 +92,8 @@ public:
         this->z *= vector.z;
         return *this;
     }
+
+    Vector floored() const;
 };
 
 inline float Vector::Magnitude() const {

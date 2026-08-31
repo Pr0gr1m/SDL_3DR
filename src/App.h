@@ -95,18 +95,26 @@ private:
     // void ConstructChunkAt(int, int, bool flat = false) const;
     void ConstructChunkAt(Vector, bool flat = false) const;
 
-    bool isPointInsideCameraFrustrumView(Vector);
+    // bool isPointInsideCameraFrustrumView(Vector);
 
-    int GetLevelOfDetailFromDistance(float distance) {
+    [[nodiscard]] static int GetLevelOfDetailFromDistance(float distance) {
         auto LOD = static_cast<int>(1.2f * std::ceil(distance / ChunkManager::chunkSizeXYZ));
         if (LOD <= 0) return 1;
         if (LOD > ChunkManager::chunkSizeXYZ) return ChunkManager::chunkSizeXYZ;
         return LOD - 1;
     }
 
-    RaycastHit CheckIsPointInsideAny(Vector) const;
+    [[nodiscard]] RaycastHit CheckIsPointInsideAny(Vector) const;
 
-    RaycastHit RaycastRay(Vector, Vector, float maxDistance = 1) const;
+    /**
+     * Raycasts a ray using DDA algorythm and returns a result
+     * @param origin Ray's orign
+     * @param dir Ray's normalized direction
+     * @param maxDistance Maximum distance in blocks / roughly
+     * @param fullDebug Full debug?
+     * @return If success, returns a raycasthit with collision information else returns RaycastHit_NULL
+     */
+    [[nodiscard]] RaycastHit RaycastRay(Vector origin, Vector dir, float maxDistance = 1, bool fullDebug = false) const;
 
     SDL_GPUBuffer *sceneVertexBuffer = nullptr;
     size_t lastSceneVertexBufferDataSize = 0;

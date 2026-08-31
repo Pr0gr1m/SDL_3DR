@@ -11,6 +11,36 @@
 #define F2STRING(Value) #Value
 
 /**
+ *@file GlobalVariables.h
+ *@brief File holding global variables, functions and macros
+ */
+
+/**
+ * Returns a sign of the integer
+ * @tparam N Must be compatible with concept std::integral
+ * @param value Value to check sign of
+ * @return 1 if value > 0, -1 if value < 0, and 0 if value == 0
+ */
+template<std::integral N>
+[[nodiscard]] int sign(N value) noexcept {
+    return value == 0 ? 0 : value > 0 ? 1 : -1;
+}
+
+/**
+ * Returns a sign of the floating number
+ * @tparam N Must be compatible with concept std::floating_point
+ * @param value Value to check sign of
+ * @return 1 if value > 0, -1 if value < 0, and 0 if value == 0
+ */
+template<std::floating_point N>
+[[nodiscard]] int sign(N value) noexcept {
+    if (std::isnan(value)) {
+        return 0;
+    }
+    return (value > 0) - (value < 0);
+}
+
+/**
  *@enum AppLogCategory
  *@brief Describes custom error log categories
 */

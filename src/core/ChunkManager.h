@@ -1,6 +1,9 @@
 #ifndef SDL1_CHUNKMANAGER_H
 #define SDL1_CHUNKMANAGER_H
 #include <vector>
+#include <map>
+#include <unordered_map>
+#include <utility>
 
 #include "Chunk.h"
 
@@ -29,7 +32,12 @@ public:
         return result;
     }();
 
+    ///All stored world chunks
     std::vector<Chunk<chunkSizeXYZ> > worldChunks;
+
+    ///Map of index based on atPosition of the chunk
+    std::unordered_map<Int3, size_t> chunkMap;
+    // std::map<Int3, size_t> chunkMap;
 };
 
 #endif //SDL1_CHUNKMANAGER_H
