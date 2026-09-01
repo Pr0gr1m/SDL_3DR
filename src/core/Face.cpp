@@ -46,17 +46,7 @@ std::array<Vertex3D, 3> Face::GetFaceDrawCallVerticies() const {
 
     auto localFaceNormal = (v2 - v1).Cross(v3 - v1).Normalized();
 
-    const Vector localFaceCenter = (v1 + v2 + v3) / 3.f;
-    if (localFaceNormal.Dot(localFaceCenter) < 0.f) {
-        localFaceNormal = localFaceNormal * -1.f;
-    }
-
     auto faceNormal = (rv2 - rv1).Cross(rv3 - rv1).Normalized();
-
-    const Vector faceCenter = (rv1 + rv2 + rv3) / 3.f;
-    if (faceNormal.Dot(faceCenter) < 0.f) {
-        faceNormal = faceNormal * -1.f;
-    }
 
     auto faceTangent = rotationMatrix3D.Multiply(chooseFaceTangent(localFaceNormal)).Normalized();
     auto uv1 = chooseFaceUV(v1, localFaceNormal);

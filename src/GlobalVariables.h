@@ -23,7 +23,7 @@
  */
 template<std::integral N>
 [[nodiscard]] int sign(N value) noexcept {
-    return value == 0 ? 0 : value > 0 ? 1 : -1;
+    return (value > 0) - (value < 0); //b - b
 }
 
 /**

@@ -95,13 +95,22 @@ private:
     // void ConstructChunkAt(int, int, bool flat = false) const;
     void ConstructChunkAt(Vector, bool flat = false) const;
 
-    // bool isPointInsideCameraFrustrumView(Vector);
+    //LOD 0: 1 block because n^0 = 1
+    //LOD 1: smallesChunkSizeLogNumber because n^1 = n
+    //LOD 2: smallesChunkSizeLogNumber^2
+    //In conclusion, min LOD is 0 and max LOD is log chunkSizeXYZ with base of smallesChunkSizeLogNumber
+    //F.e with chunk size of 16, which is not prime, smallest log number is 2 so max lod is 4 (2^4 = 16)
+    //But if chunk size is prime number like 7, smallest log number will be 1 and no LOD effect can be applied, so this can be standalone scenario
 
     [[nodiscard]] static int GetLevelOfDetailFromDistance(float distance) {
-        auto LOD = static_cast<int>(1.2f * std::ceil(distance / ChunkManager::chunkSizeXYZ));
-        if (LOD <= 0) return 1;
-        if (LOD > ChunkManager::chunkSizeXYZ) return ChunkManager::chunkSizeXYZ;
-        return LOD - 1;
+        if (ChunkManager::smallestChunkSizeLogNumber == 1) return 0;
+        
+        auto LOD = static_cast<int>(std::ceil(1.2f * distance / ChunkManager::chunkSizeXYZ)) - 1; //[0, infinity)
+        SDL_Log("For distance %f lod is %i", distance, LOD);
+        // if (LOD <= 0) return 1;
+        if (std::pow(ChunkManager::smallestChunkSizeLogNumber, LOD) >= ChunkManager::chunkSizeXYZ) //This could be a (f.e hash) table
+            return static_cast<int>(log(ChunkManager::chunkSizeXYZ) / log(ChunkManager::smallestChunkSizeLogNumber));
+        return LOD;
     }
 
     [[nodiscard]] RaycastHit CheckIsPointInsideAny(Vector) const;

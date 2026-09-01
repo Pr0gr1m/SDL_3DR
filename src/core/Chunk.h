@@ -16,6 +16,8 @@ public:
     Vector atPosition = Vector(0, 0, 0);
     ///Map of all objects with local offset to chunk root
     std::map<Vector, Object> blocks;
+    ///Temporary, so thin structures dont disapear for debug only
+    bool didUserEditChunk{};
 
     Chunk() = default;
 

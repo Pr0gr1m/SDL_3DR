@@ -4,13 +4,14 @@
 #include "Vector.h"
 #include <functional>
 #include <cstddef>
+#include <expected>
 #include <functional>
 #include <iomanip>
 #include <iostream>
 #include <string>
 #include <unordered_set>
 
-//TODO: I need to find a solution for operator< for Int3 to use std::map (Red-black tree), instead of using std::unordered_map (hash table)
+//TODO: I need to find a solution for operator< for Int3 to use std::map (Red-black tree) or any BST, instead of using std::unordered_map (hash table)
 
 /**
  * @class Int3
@@ -31,9 +32,41 @@ public:
      *@returns A vector
      */
     Vector toVector() const;
-    
+
     bool operator==(const Int3 &other) const {
         return (a == other.a) && (b == other.b) && (c == other.c);
+    }
+
+    bool operator<(const Int3 &other) const {
+        //Priority: a,b,c (x,y,z)
+        // if (a == other.a && b == other.b && c == other.c) {
+        //     return false;
+        // }
+
+        // if (a < other.a) {
+        //     return true;
+        // }
+        //
+        // if (b < other.b) {
+        //     return true;
+        // }
+        // if (c < other.c) {
+        //     return true;
+        // }
+        
+        if (a != other.a) {
+            return a > other.a;
+        }
+
+        if (b != other.b) {
+            return b > other.b;
+        }
+
+        if (c != other.c) {
+            return c > other.c;
+        }
+
+        return false;
     }
 };
 

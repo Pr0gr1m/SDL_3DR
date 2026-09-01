@@ -16,10 +16,11 @@ public:
     ///Size of chunk in all axis
     static constexpr int chunkSizeXYZ = 16; //starting from 0,0,0 the chunk it goes from -8,-8,-8 and to 8,8,8
 
-    ///Smallest number where logarythm of chunkSizeXYZ with the number as the base is a whole number
+    ///Smallest number where logarythm of chunkSizeXYZ with the number as the base is a whole number, except for 1 (unless chunkSizeXYZ is prime number)
     static constexpr int smallestChunkSizeLogNumber = [] {
         int result = 1;
-        for (int num = ChunkManager::chunkSizeXYZ; num != 1; --num) {
+        //for (int num = ChunkManager::chunkSizeXYZ; num != 1; --num) {
+        for (int num = 2; num != ChunkManager::chunkSizeXYZ; num += 1) {
             int power = num;
             while (power < ChunkManager::chunkSizeXYZ) {
                 power *= num;
@@ -29,15 +30,16 @@ public:
                 break;
             }
         }
-        return result;
+        return
+                result;
     }();
 
     ///All stored world chunks
     std::vector<Chunk<chunkSizeXYZ> > worldChunks;
 
     ///Map of index based on atPosition of the chunk
-    std::unordered_map<Int3, size_t> chunkMap;
-    // std::map<Int3, size_t> chunkMap;
+    // std::unordered_map<Int3, size_t> chunkMap;
+    std::map<Int3, size_t> chunkMap;
 };
 
 #endif //SDL1_CHUNKMANAGER_H
