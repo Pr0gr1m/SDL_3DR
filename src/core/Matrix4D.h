@@ -76,11 +76,11 @@ public:
         );
     }
 
-    const char *toString() const {
-        return (std::string(F2STRING(x0)) + "," + std::string(F2STRING(x1)) + std::string(F2STRING(x2)) + "," + std::string(F2STRING(x3)) + "\n" +
-                std::string(F2STRING(y0)) + "," + std::string(F2STRING(y1)) + std::string(F2STRING(y2)) + "," + std::string(F2STRING(y3)) + "\n" +
-                std::string(F2STRING(z0)) + "," + std::string(F2STRING(z1)) + std::string(F2STRING(z2)) + "," + std::string(F2STRING(z3)) + "\n" +
-                std::string(F2STRING(j0)) + "," + std::string(F2STRING(j1)) + std::string(F2STRING(j2)) + "," + std::string(F2STRING(j3)) + "\n").c_str();
+    std::string toString() const {
+        return std::string(F2STRING(x0)) + "," + std::string(F2STRING(x1)) + std::string(F2STRING(x2)) + "," + std::string(F2STRING(x3)) + "\n" +
+               std::string(F2STRING(y0)) + "," + std::string(F2STRING(y1)) + std::string(F2STRING(y2)) + "," + std::string(F2STRING(y3)) + "\n" +
+               std::string(F2STRING(z0)) + "," + std::string(F2STRING(z1)) + std::string(F2STRING(z2)) + "," + std::string(F2STRING(z3)) + "\n" +
+               std::string(F2STRING(j0)) + "," + std::string(F2STRING(j1)) + std::string(F2STRING(j2)) + "," + std::string(F2STRING(j3)) + "\n";
     }
 };
 

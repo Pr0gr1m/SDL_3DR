@@ -38,7 +38,6 @@ public:
     std::vector<Chunk<chunkSizeXYZ> > worldChunks;
 
     ///Map of index based on atPosition of the chunk
-    // std::unordered_map<Int3, size_t> chunkMap;
     std::map<Int3, size_t> chunkMap;
 };
 

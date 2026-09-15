@@ -93,7 +93,7 @@ private:
     SDL_AppResult OnUpdate();
 
     // void ConstructChunkAt(int, int, bool flat = false) const;
-    void ConstructChunkAt(Vector, bool flat = false) const;
+    void ConstructChunkAtLine(Vector, bool flat = false) const;
 
     //LOD 0: 1 block because n^0 = 1
     //LOD 1: smallesChunkSizeLogNumber because n^1 = n
@@ -101,10 +101,9 @@ private:
     //In conclusion, min LOD is 0 and max LOD is log chunkSizeXYZ with base of smallesChunkSizeLogNumber
     //F.e with chunk size of 16, which is not prime, smallest log number is 2 so max lod is 4 (2^4 = 16)
     //But if chunk size is prime number like 7, smallest log number will be 1 and no LOD effect can be applied, so this can be standalone scenario
-
     [[nodiscard]] static int GetLevelOfDetailFromDistance(float distance) {
         if (ChunkManager::smallestChunkSizeLogNumber == 1) return 0;
-        
+
         auto LOD = static_cast<int>(std::ceil(1.2f * distance / ChunkManager::chunkSizeXYZ)) - 1; //[0, infinity)
         SDL_Log("For distance %f lod is %i", distance, LOD);
         // if (LOD <= 0) return 1;
@@ -144,6 +143,6 @@ private:
 
     // std::unique_ptr<Simulation> simulation;
 
-    const char *kVertexShaderPath = "shaders/vertex.spv";
-    const char *kFragmentShaderPath = "shaders/fragment.spv";
+    const char *kVertexShaderPath = {"shaders/vertex.spv"};
+    const char *kFragmentShaderPath = {"shaders/fragment.spv"};
 };

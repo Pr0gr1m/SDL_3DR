@@ -24,7 +24,7 @@ struct RaycastHit {
     ///Block type that was hit (boolean as there is 1 block type, mentioned in implementation of App::ConstructChunkAt)
     bool blockType = false;
 
-    ///Hit block's position
+    ///Hit block's world position
     Vector blockPosition{};
 };
 
