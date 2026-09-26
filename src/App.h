@@ -26,7 +26,7 @@ public:
     SDL_AppResult Event(const SDL_Event *event);
 
     ///Quits application
-    void Quit(SDL_AppResult result) const;
+    void Quit(SDL_AppResult result);
 
     ~App();
 
@@ -39,6 +39,33 @@ public:
         Dxil, //unused
     };
 
+    // /**
+    //  * @struct LODDBLock
+    //  * @brief Represents a block after LOD
+    //  */
+    // struct LODDBLock {
+    //     struct LODDBlock {
+    //         std::array<Face, 12> faces;
+    //
+    //         LODDBlock() = default;
+    //
+    //         LODDBlock(std::array<Face, 12> faces) : faces(faces) {
+    //         }
+    //     };
+    // };
+    // /**
+    //  * @struct ChunkMeshCache
+    //  * @brief Represents cached chunk mesh made up of LODDBlocks
+    //  */
+    // struct ChunkMeshCache {
+    //     std::vector<LODDBLock> lodBlocks;
+    //     int cachedLOD = -1;
+    //     bool isValidCache = false;
+    // };
+
+    //TODO: implement further from deepsek
+    std::vector<ChunkMeshCache> cachedChunkMeshes;
+
     /**
      * @struct LoadedShaderBinary
      * @brief Describes a compiled and loaded shader binary
@@ -49,7 +76,7 @@ public:
     };
 
     ///Returns a downwards vector / opposite to world up
-    static Vector GetGravityVector();
+    static constexpr Vector GetGravityVector();
 
     Uint64 deltaTimeMS; //KEEP IN MIND - NEED TO DIVIDE BY 1000 TO GET SECONDS
     Uint64 currentMillisecondsSinceStart;
@@ -141,8 +168,9 @@ private:
 
     char *basePath;
 
-    // std::unique_ptr<Simulation> simulation;
-
     const char *kVertexShaderPath = {"shaders/vertex.spv"};
     const char *kFragmentShaderPath = {"shaders/fragment.spv"};
+
+    size_t totalFPS;
+    int numFPS;
 };

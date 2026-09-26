@@ -4,8 +4,6 @@
 #include "Vector.h"
 #include "Int3.h"
 
-#include "Face.h"
-
 /**
  *@class Mesh
  *@brief A Trivial class representing mesh, containing verticies and triangles pointers

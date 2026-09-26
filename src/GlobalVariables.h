@@ -40,6 +40,8 @@ template<std::floating_point N>
     return (value > 0) - (value < 0);
 }
 
+[[nodiscard]] static constexpr int toInt(float f) { return static_cast<int>(std::lround(f)); }
+
 /**
  *@enum AppLogCategory
  *@brief Describes custom error log categories

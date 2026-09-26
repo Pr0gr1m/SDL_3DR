@@ -309,7 +309,7 @@ SDL_AppResult App::Init() {
         .entrypoint = "main",
         .format = SDL_GPU_SHADERFORMAT_SPIRV,
         .stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
-        .num_samplers = 0,
+        .num_samplers = 2,
         .num_storage_textures = 0,
         .num_storage_buffers = 0,
         .num_uniform_buffers = 0,
@@ -510,14 +510,17 @@ SDL_AppResult App::Init() {
     noise = new SimplexNoise(0.15f, 3, 0, 0);
 
     ConstructChunkAtLine(Vector(0, 0, 0));
-    //ConstructChunkAtLine(Vector(16, 0, 0));
-    //ConstructChunkAtLine(Vector(0, 0, 16));
-    //ConstructChunkAtLine(Vector(16, 0, 16));
+    ConstructChunkAtLine(Vector(16, 0, 0));
+    ConstructChunkAtLine(Vector(0, 0, 16));
+    ConstructChunkAtLine(Vector(16, 0, 16));
     //ConstructChunkAtLine(Vector(-16, 0, 0));
     //ConstructChunkAtLine(Vector(0, 0, -16));
     //ConstructChunkAtLine(Vector(-16, 0, -16));
 
+    SDL_Log("%zu chunks", chunkManager->worldChunks.size());
+
     delete noise;
+    noise = nullptr;
 
     SDL_WaitForGPUIdle(m_gpuDevice.get()); //Block rendering and showing window until gpu is idle
 
@@ -645,10 +648,19 @@ SDL_AppResult App::Event(const SDL_Event *event) {
                     auto &chunk = chunkManager->worldChunks[iterator->second];
                     const Vector localBlockPosition = result.blockPosition - chunk.atPosition;
 
-                    auto blockIter = chunk.blocks.find(localBlockPosition);
-                    if (blockIter != chunk.blocks.end()) {
-                        chunk.blocks.erase(blockIter);
+                    auto blockAt = chunk.tryGet(localBlockPosition);
+                    if (blockAt != nullptr && blockAt->has_value()) {
+                        blockAt->reset();
                     }
+
+                    // auto blockIter = chunk.blocks.begin();
+                    // while (blockIter != chunk.blocks.end()) {
+                    //     auto block = *blockIter;
+                    //     if (block.has_value() && block.value().Position == result.blockPosition) block.reset();
+                    // }
+                    // if (blockIter != chunk.blocks.end()) {
+                    //     // chunk.blocks.erase(blockIter);
+                    // }
 
                     // chunk.blocks[localBlockPosition] = Object{cubeMesh.get(), worldBlockPosition};
                     // const Vector towerBase = result.blockPosition + Vector(0.f, 1.f, 0.f);
@@ -700,9 +712,11 @@ SDL_AppResult App::Event(const SDL_Event *event) {
             CONTINUE;
 }
 
-void App::Quit(SDL_AppResult result) const {
+void App::Quit(SDL_AppResult result) {
     //Disable compiler warn about unused result arg: https://stackoverflow.com/questions/58019275/what-is-the-purpose-of-voidvariable-in-c
     //(void) result;
+
+    SDL_Log("Average FPS during rendering: %f", static_cast<float>(totalFPS / numFPS));
 
     auto quitStartTicks = SDL_GetTicks();
     SDL_Log("Quit event, freeing memory");
@@ -749,10 +763,17 @@ void App::Quit(SDL_AppResult result) const {
         SDL_free(basePath);
     }
 
+    cubeMesh.reset();
+    chunkManager.reset();
+    textureManager.reset();
+
     auto endTickDuration = (SDL_GetTicks() - quitStartTicks);
     SDL_Log("Quit took %zi ms", endTickDuration);
-    
+
     SDL_ReleaseWindowFromGPUDevice(m_gpuDevice.get(), m_Window.get()); //Destroys window's swapchain texture
+
+    m_Window.reset();
+    m_gpuDevice.reset();
 }
 
 App::~App() = default;
@@ -1095,6 +1116,39 @@ SDL_AppResult App::OnUpdate() {
 void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
     //From -10 to 0
 
+    // Chunk<ChunkManager::chunkSizeXYZ> chunk(atPos);
+    // for (int x = 0; x < ChunkManager::chunkSizeXYZ; x++) {
+    //     for (int z = 0; z < ChunkManager::chunkSizeXYZ; z++) {
+    //         float rawNoiseVal = SimplexNoise::noise(x * noise->mFrequency, z * noise->mFrequency);
+    //         rawNoiseVal += 0.5f;
+    //         rawNoiseVal /= 2;
+    //
+    //         rawNoiseVal *= noise->mAmplitude;
+    //
+    //         // int y = flat ? 0 : (int) (noise->mAmplitude * rawNoiseVal);
+    //         int y = flat ? 0 : (int) rawNoiseVal;
+    //
+    //         //chunk.blocks[Vector(x, 0, z)] = {cubeMesh, chunk.atPosition + Vector(x, 0, z)};
+    //
+    //         // SDL_Log("x=%d, z=%d", x, z);
+    //         // const Vector pos = Vector(x, 0, z);
+    //         // SDL_Log("pos=(%f,%f,%f)", pos.x, pos.y, pos.z);
+    //         // const Object obj = {cubeMesh.get(), chunk.atPosition + Vector(x, 0, z)};
+    //         //chunk.blocks.emplace(pos, std::move(obj));
+    //
+    //         //min limit is -1 presumably
+    //         for (; y >= -1; y--) {
+    //             chunk.tryInsert(Vector(x, y, z), {cubeMesh.get(), chunk.atPosition + Vector(x, y, z)});
+    //             // chunk.blocks[Vector(x, y, z)] = std::move({cubeMesh.get(), chunk.atPosition + Vector(x, y, z)}; //for now we have either block or no block, to be replaced w enum?
+    //             //chunk.blocks.insert(Object{cubeMesh.get(), chunk.atPosition + Vector(x, y, z)}); //for now we have either block or no block, to be replaced w enum?)
+    //         }
+    //     }
+    // }
+    //
+    // chunkManager->worldChunks.push_back(std::move(chunk));
+    // chunkManager->chunkMap.insert({atPos.toInt3(), chunkManager->worldChunks.size() - 1});
+    // return;
+
     std::vector<Chunk<ChunkManager::chunkSizeXYZ> > yChunks;
     for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
         for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
@@ -1110,12 +1164,12 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
 
             int rawNoiseValInt = static_cast<int>(rawNoiseVal);
 
-            constexpr int groundZeroYLevel = 0; //only 1 chunk for test
+            constexpr int groundZeroYLevel = -2; //only 1 chunk for test
             int distToGroundZero = rawNoiseValInt - groundZeroYLevel;
             int firstChunkBlocks = distToGroundZero % 16;
-            int numChunksOnY = ceil(distToGroundZero / 16.f); //+ 1; ceil rounds up
+            int numChunksOnY = static_cast<int>(ceil(distToGroundZero / 16.00)); //ceil rounds up
 
-            SDL_Log("Line %i, %i %i chunks with dist %i has noise value of %f (%i)", x, z, numChunksOnY, distToGroundZero, rawNoiseVal, rawNoiseValInt);
+            //SDL_Log("Line %i, %i %i chunks with dist %i has noise value of %f (%i)", x, z, numChunksOnY, distToGroundZero, rawNoiseVal, rawNoiseValInt);
 
             Chunk<ChunkManager::chunkSizeXYZ> *currentlyWorkingChunk = nullptr;
 
@@ -1124,8 +1178,11 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
                 Vector currentPlacePos = Vector(atPos.x, -(chunkI * ChunkManager::chunkSizeXYZ), atPos.z);
 
                 for (const auto &chunk: yChunks) {
-                    if (chunk.atPosition == currentPlacePos) {
+                    //if (chunk.atPosition == currentPlacePos) {
+                    if (chunk.PositionInBounds(currentPlacePos)) {
                         currentlyWorkingChunk = const_cast<Chunk<ChunkManager::chunkSizeXYZ> *>(&chunk);
+                        SDL_Log("Found chunk at %f,%f,%f", currentPlacePos.x, currentPlacePos.y, currentPlacePos.z);
+                        break;
                     }
                 }
 
@@ -1133,19 +1190,27 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
                     Chunk<ChunkManager::chunkSizeXYZ> newChunk(Vector(atPos.x, -(chunkI * ChunkManager::chunkSizeXYZ), atPos.y));
                     yChunks.push_back(std::move(newChunk));
                     currentlyWorkingChunk = &yChunks.back();
+
+                    SDL_Log("Creating new chunk at %f,%f,%f", currentPlacePos.x, currentPlacePos.y, currentPlacePos.z);
+                }
+
+                if (currentlyWorkingChunk == nullptr) {
+                    throw std::runtime_error("Failed to create chunk");
+                    return;
                 }
 
                 for (int chunkY = (chunkI == 0 ? firstChunkBlocks : 16) - 1; chunkY >= 0; chunkY--) {
-                    currentlyWorkingChunk->blocks[Vector(x, chunkY, z)] = {cubeMesh.get(), Vector(x, -chunkI * ChunkManager::chunkSizeXYZ + chunkY, z)};
-                    SDL_Log("Creating new block at position %i,%i,%i", x, chunkY, z);
+                    currentlyWorkingChunk->tryInsert(Vector(x, chunkY, z), {cubeMesh.get(), Vector(x, -chunkI * ChunkManager::chunkSizeXYZ + chunkY, z)});
+                    //currentlyWorkingChunk->blocks[Vector(x, chunkY, z)] = {cubeMesh.get(), Vector(x, -chunkI * ChunkManager::chunkSizeXYZ + chunkY, z)};
+                    //SDL_Log("Creating new block at position %i,%i,%i", x, chunkY, z);
                 }
             }
         }
+    }
 
-        for (const auto &chunk: yChunks) {
-            chunkManager->worldChunks.push_back(std::move(chunk));
-            chunkManager->chunkMap.insert({chunk.atPosition.toInt3(), chunkManager->worldChunks.size() - 1});
-        }
+    for (const auto &chunk: yChunks) {
+        chunkManager->worldChunks.push_back(chunk);
+        chunkManager->chunkMap.insert({chunk.atPosition.toInt3(), chunkManager->worldChunks.size() - 1});
     }
 }
 
@@ -1158,12 +1223,13 @@ RaycastHit App::CheckIsPointInsideAny(Vector point) const {
         const auto &chunk = chunkManager->worldChunks[iterator->second];
         const Vector blockPosition = worldBlockPosition - chunk.atPosition;
 
-        const auto block = chunk.blocks.find(blockPosition);
-        if (block != chunk.blocks.end()) {
+        // const auto block = chunk.blocks.find(blockPosition);
+        const auto blockAt = chunk.tryGet(blockPosition);
+        if (blockAt != nullptr && blockAt->has_value()) {
             return RaycastHit{
                 .hit = true,
                 .blockType = true,
-                .blockPosition = block->first + chunk.atPosition
+                .blockPosition = blockAt->value().Position + chunk.atPosition
             };
         }
     }
@@ -1239,7 +1305,7 @@ RaycastHit App::RaycastRay(Vector pos, Vector normDir, float maxDistance, bool f
     return RaycastHit_NULL;
 }
 
-Vector App::GetGravityVector() {
+constexpr Vector App::GetGravityVector() {
     return Vector(0, -1, 0) * 9.81f;
 }
 
@@ -1259,12 +1325,12 @@ SDL_AppResult App::OnRender() {
     float float16Array[16];
     viewProjection.toOutFloat16Array(float16Array);
 
-    SDL_PushGPUVertexUniformData(
-        commandBuffer,
-        0,
-        float16Array,
-        sizeof(float16Array)
-    );
+    // SDL_PushGPUVertexUniformData(
+    //     commandBuffer,
+    //     0,
+    //     float16Array,
+    //     sizeof(float16Array)
+    // );
 
     auto getMeshDrawCallVerticies = [](Mesh *mesh) {
         return mesh->numTriangles > 0 ? mesh->numTriangles * 3 : 0; //count numTriangles cuz triangles is what we render not verticies
@@ -1292,21 +1358,16 @@ SDL_AppResult App::OnRender() {
 
     auto startTicks = SDL_GetTicks();
 
-    std::vector<std::vector<Face> > chunkLocalFaces(chunkManager->worldChunks.size());
+    //std::vector<std::vector<LODDBlock> > chunkLODDBLocks(chunkManager->worldChunks.size());
+    std::vector<std::vector<LODDBLock> > chunkLODBlocks;
+    chunkLODBlocks.resize(chunkManager->worldChunks.size());
 
-    std::for_each(std::execution::par, chunkManager->worldChunks.begin(), chunkManager->worldChunks.end(), [&](auto &chunk) {
+    std::for_each(std::execution::par, chunkManager->worldChunks.begin(), chunkManager->worldChunks.end(), [&](Chunk<ChunkManager::chunkSizeXYZ> &chunk) {
         size_t idx = &chunk - chunkManager->worldChunks.data();
 
         //Check if whole chunk is in camera frustrum
         Vector chunkBoundsMin = chunk.atPosition;
         Vector chunkBoundsMax = chunk.atPosition + Vector(ChunkManager::chunkSizeXYZ, ChunkManager::chunkSizeXYZ, ChunkManager::chunkSizeXYZ);
-
-        // for (const auto &plane: sceneCamera->frustrumPlanes) {
-        //     const float x = (plane.A > 0) ? chunkBoundsMax.x : chunkBoundsMin.x;
-        //     const float y = (plane.B > 0) ? chunkBoundsMax.y : chunkBoundsMin.y;
-        //     const float z = (plane.C > 0) ? chunkBoundsMax.z : chunkBoundsMin.z;
-        //     if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0) return;
-        // }
 
         bool isInsideFrustum = true;
         for (const auto &plane: sceneCamera->frustrumPlanes) {
@@ -1327,25 +1388,36 @@ SDL_AppResult App::OnRender() {
 
         //Distance from chunk center to player
         float distance = distVector.Magnitude();
+        auto LOD = chunk.didUserEditChunk ? 0 : GetLevelOfDetailFromDistance(distance);
 
-        auto LOD = 0; // chunk.didUserEditChunk ? 0 : GetLevelOfDetailFromDistance(distance);
+        std::vector<LODDBLock> chunkLocalBlocks;
+        chunkLocalBlocks.reserve(ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ); //preallocate for 1 chunk, this is only once per thread so shouldnt be that bad
+
+        //check if LOD is cached for chunk
+        if (chunk.cache.cachedLOD == LOD && chunk.cache.isValidCache) {
+            // totalVertexNumber.fetch_add(3 * 8); //3 verticies for 8 faces
+            chunkLODBlocks[idx] = chunk.cache.lodBlocks;
+            totalVertexNumber.fetch_add(chunk.cache.lodBlocks.size() * 3 * 12);
+            return;
+        }
 
         int LODBlockSize = std::min(static_cast<int>(std::pow(ChunkManager::smallestChunkSizeLogNumber, LOD)), ChunkManager::chunkSizeXYZ);
         const int maxBlockCountInLOD = LODBlockSize * LODBlockSize * LODBlockSize;
 
         //Ignore empty chunks (f.e sky or ungenerated underground)
-        if (chunk.blocks.empty()) return;
+        if (chunk.isEmpty()) return;
 
         //Prefill a 3D grid for faster access within the chunk
         bool blockPresence[ChunkManager::chunkSizeXYZ][ChunkManager::chunkSizeXYZ][ChunkManager::chunkSizeXYZ]{};
-        for (const auto &[pos, obj]: chunk.blocks) {
-            int ix = static_cast<int>(pos.x);
-            int iy = static_cast<int>(pos.y);
-            int iz = static_cast<int>(pos.z);
-            if (ix >= 0 && ix < ChunkManager::chunkSizeXYZ &&
-                iy >= 0 && iy < ChunkManager::chunkSizeXYZ &&
-                iz >= 0 && iz < ChunkManager::chunkSizeXYZ) {
-                blockPresence[ix][iy][iz] = true;
+        for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
+            for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += 1) {
+                for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
+                    const auto blockAt = chunk.tryGet(Vector(x, y, z));
+                    if (blockAt != nullptr && blockAt->has_value())
+                        blockPresence[x][y][z] = true;
+                    else
+                        blockPresence[x][y][z] = false;
+                }
             }
         }
 
@@ -1408,20 +1480,77 @@ SDL_AppResult App::OnRender() {
 
                         for (auto &blockFace: blockFaces) {
                             blockFace += chunk.atPosition;
-                            if (isFaceInCameraFrustrum(&blockFace)) {
-                                chunkLocalFaces[idx].push_back(std::move(blockFace));
-                                totalVertexNumber.fetch_add(3);
-                                totalLineVertexNumber.fetch_add(3 * 2);
-                            }
                         }
+
+                        chunkLocalBlocks.emplace_back(blockFaces);
+
+                        totalVertexNumber.fetch_add(3 * 12); //3 verticies for 12 faces
                     }
                 }
             }
         }
+
+        chunk.cache.lodBlocks = std::move(chunkLocalBlocks); //lod blocks have global lifetime so they should have blocks moved into
+        chunkLODBlocks[idx] = chunk.cache.lodBlocks;
+
+        chunk.cache.cachedLOD = LOD;
+        chunk.cache.isValidCache = true;
     });
 
-    SDL_Log("Frustrum culling took: %llu ms...", (SDL_GetTicks() - startTicks));;
-    SDL_Log("Num of verticies total: %zi", totalVertexNumber.load());
+
+    SDL_Log("Frustrum culling took: %llu ms...", (SDL_GetTicks() - startTicks));
+
+    startTicks = SDL_GetTicks();
+    // std::vector<Face> chunkFaces;
+    // std::atomic faceIdx = 0;
+    // std::for_each(std::execution::par, chunkLODDBLocks.begin(), chunkLODDBLocks.end(), [&](std::map<Vector, LODDBlock> &map) {
+    //     if (map.empty()) return;
+    //
+    //     //axis y
+    //     for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
+    //         for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
+    //             Face bottomFaces[2];
+    //             Face topFaces[2];
+    //
+    //             for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += 1) {
+    //                 if (map.contains(Vector(x, y, z))) {
+    //                     const auto &block = map.at(Vector(x, y, z));
+    //                     if (y == 0) {
+    //                         bottomFaces[0] = block.faces[2];
+    //                         bottomFaces[1] = block.faces[3];
+    //                     } else {
+    //                         topFaces[0] = block.faces[0];
+    //                         topFaces[1] = block.faces[1];
+    //                     }
+    //                 } else {
+    //                     LODDBlock block{};
+    //
+    //                     if (y == 0) {
+    //                         block = map.at(Vector(x, y, z));
+    //                     } else {
+    //                         block = map.at(Vector(x, y - 1, z));
+    //                     }
+    //
+    //                     topFaces[0] = block.faces[0];
+    //                     topFaces[1] = block.faces[1];
+    //
+    //                     break;
+    //                 }
+    //             }
+    //
+    //             //SDL_Log("X : %i , Z : %i B : {%f,%f,%f}", x, z, bottomFaces[0].globalPoint1.x, bottomFaces[0].globalPoint1.y, bottomFaces[0].globalPoint1.z);
+    //
+    //             chunkFaces.push_back(bottomFaces[0]);
+    //             chunkFaces.push_back(bottomFaces[1]);
+    //             chunkFaces.push_back(topFaces[0]);
+    //             chunkFaces.push_back(topFaces[1]);
+    //
+    //             totalVertexNumber.fetch_add(4 * 2);
+    //         }
+    //     }
+    // });
+
+    SDL_Log("Greedy meshing took: %llu ms...", (SDL_GetTicks() - startTicks));;
 
     if (deltaTimeMS == 0) {
         SDL_Log("FPS: 0 (0DMS)");
@@ -1432,30 +1561,33 @@ SDL_AppResult App::OnRender() {
     const size_t lineStartVertex = totalVertexNumber.load();
     const size_t totalUploadedVertexNumber = totalVertexNumber.load() + totalLineVertexNumber.load();
 
-    std::vector<Vertex3D> verticies(totalUploadedVertexNumber);
+    SDL_Log("Num of verticies total: %zi", lineStartVertex);
 
-    const Uint32 vertexDataSize = totalUploadedVertexNumber * sizeof(Vertex3D);
+    if (totalUploadedVertexNumber > 0) {
+        totalFPS += static_cast<int>(1000 / deltaTimeMS);
+        numFPS += 1;
 
-    if
-    (vertexDataSize
-     >
-     0
-    ) {
+        std::vector<Vertex3D> verticies(totalUploadedVertexNumber);
+
+        const Uint32 vertexDataSize = totalUploadedVertexNumber * sizeof(Vertex3D);
+
+        std::vector<Face> nonFrustrumCulledFaces{};
+
         //Combine vector of vectors of faces into one vector
-        std::vector<Face> nonFrustrumCulledFaces;
-
         size_t totalFaces = 0;
-        for (const auto &vec: chunkLocalFaces) {
-            totalFaces += vec.size();
+        for (const auto &vec: chunkLODBlocks) {
+            totalFaces += vec.size() * 12; // each LODDBlock has 12 faces
         }
-
         nonFrustrumCulledFaces.reserve(totalFaces);
 
-        for (auto &vec: chunkLocalFaces) {
-            //Move iterator is abstraction of normal iterator that when using dereferencing ( * ) gives T&& instead of T& allowing compiler to do same thing as std::move but to iterator
-            nonFrustrumCulledFaces.insert(nonFrustrumCulledFaces.end(),
-                                          std::make_move_iterator(vec.begin()),
-                                          std::make_move_iterator(vec.end()));
+        for (const auto &vec: chunkLODBlocks) {
+            for (const auto &block: vec) {
+                nonFrustrumCulledFaces.insert(
+                    nonFrustrumCulledFaces.end(),
+                    block.faces.begin(),
+                    block.faces.end()
+                );
+            }
         }
 
         std::atomic<size_t> cpyIndex{0};
@@ -1466,11 +1598,11 @@ SDL_AppResult App::OnRender() {
             memcpy(verticies.data() + start, drawcallVerts.data(), 3 * sizeof(Vertex3D));
         });
 
-        std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
-            auto linecallVerts = face.GetFaceLineCallVerticies();
-            auto start = cpyIndex.fetch_add(6);
-            memcpy(verticies.data() + start, linecallVerts.data(), 6 * sizeof(Vertex3D));
-        });
+        // std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
+        //     auto linecallVerts = face.GetFaceLineCallVerticies();
+        //     auto start = cpyIndex.fetch_add(6);
+        //     memcpy(verticies.data() + start, linecallVerts.data(), 6 * sizeof(Vertex3D));
+        // });
 
         if (sceneVertexBuffer == nullptr) {
             SDL_GPUBufferCreateInfo bufferInfo{};
@@ -1485,14 +1617,17 @@ SDL_AppResult App::OnRender() {
                 return FAILURE;
             }
         } else {
-            constexpr bool canCreateVertexBufferEveryFrame = true;
+            constexpr bool canCreateVertexBufferEveryFrame = false; //on average it is better to keep false (For now)
             if (canCreateVertexBufferEveryFrame) {
                 if (lastSceneVertexBufferDataSize != vertexDataSize) {
+                    // SDL_WaitForGPUIdle(m_gpuDevice.get());
                     if (sceneVertexBuffer) SDL_ReleaseGPUBuffer(m_gpuDevice.get(), sceneVertexBuffer);
                     SDL_GPUBufferCreateInfo bufferInfo{};
                     bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
                     bufferInfo.size = vertexDataSize;
                     bufferInfo.props = 0;
+
+                    SDL_WaitForGPUIdle(m_gpuDevice.get());
                     sceneVertexBuffer = SDL_CreateGPUBuffer(m_gpuDevice.get(), &bufferInfo);
                     lastSceneVertexBufferDataSize = vertexDataSize;
                     if (!sceneVertexBuffer) {
@@ -1514,7 +1649,7 @@ SDL_AppResult App::OnRender() {
             return FAILURE;
         }
 
-        Vertex3D *mappedData = static_cast<Vertex3D *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer, true));
+        auto *mappedData = static_cast<Vertex3D *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer, true));
         if (!mappedData) {
             SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to map transfer buffer: %s", SDL_GetError());
             SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer);
@@ -1542,23 +1677,13 @@ SDL_AppResult App::OnRender() {
 
     //Acquire the swapchain texture for rendering
     SDL_GPUTexture *swapchainTexture;
-    if
-    (
-
-
-        !
-        SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)
-    ) {
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Could not acquire swapchain texture: %s", SDL_GetError());
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
     }
 
-    if
-    (swapchainTexture
-     ==
-     nullptr
-    ) {
+    if (swapchainTexture == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Swapchain texture is null");
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
@@ -1566,51 +1691,22 @@ SDL_AppResult App::OnRender() {
 
     //Set up the colour target info for the render pass
     SDL_GPUColorTargetInfo colorTargetInfo = {};
-    colorTargetInfo
-            .
-            texture = swapchainTexture;
-    colorTargetInfo
-            .
-            clear_color =
-            (SDL_FColor){0.1f, 0.1f, 0.2f, 1.0f}; //dark blue-grey
-    colorTargetInfo
-            .
-            load_op = SDL_GPU_LOADOP_CLEAR;
-    colorTargetInfo
-            .
-            store_op = SDL_GPU_STOREOP_STORE;
+    colorTargetInfo.texture = swapchainTexture;
+    colorTargetInfo.clear_color = (SDL_FColor){0.1f, 0.1f, 0.2f, 1.0f}; //dark blue-grey
+    colorTargetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
+    colorTargetInfo.store_op = SDL_GPU_STOREOP_STORE;
 
     SDL_GPUDepthStencilTargetInfo depthTarget = {};
-    depthTarget
-            .
-            texture =
-            this
-            ->
-            depthTexture;
-    depthTarget
-            .
-            clear_depth =
-            1.0f; //far plane value
-    depthTarget
-            .
-            load_op = SDL_GPU_LOADOP_CLEAR;
-    depthTarget
-            .
-            store_op = SDL_GPU_STOREOP_STORE;
-    depthTarget
-            .
-            stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
-    depthTarget
-            .
-            stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
+    depthTarget.texture = this->depthTexture;
+    depthTarget.clear_depth = 1.0f; //far plane value
+    depthTarget.load_op = SDL_GPU_LOADOP_CLEAR;
+    depthTarget.store_op = SDL_GPU_STOREOP_STORE;
+    depthTarget.stencil_load_op = SDL_GPU_LOADOP_DONT_CARE;
+    depthTarget.stencil_store_op = SDL_GPU_STOREOP_DONT_CARE;
 
     //Begin render pass
     SDL_GPURenderPass *renderPass = SDL_BeginGPURenderPass(commandBuffer, &colorTargetInfo, 1, &depthTarget);
-    if
-    (renderPass
-     ==
-     nullptr
-    ) {
+    if (renderPass == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to begin render pass");
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
@@ -1619,16 +1715,15 @@ SDL_AppResult App::OnRender() {
     SDL_GPUViewport viewport = {0, 0, (float) defaultScreenWidth, (float) defaultScreenHeight, 0.0f, 1.0f};
     SDL_SetGPUViewport(renderPass, &viewport);
 
-    if
-    (totalUploadedVertexNumber
-     >
-     0
-     &&
-     sceneVertexBuffer
-     !=
-     nullptr
-    ) {
+    if (totalUploadedVertexNumber > 0 && sceneVertexBuffer != nullptr) {
         SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
+
+        SDL_PushGPUVertexUniformData(
+            commandBuffer,
+            0,
+            float16Array,
+            sizeof(float16Array)
+        );
 
         //Bind our vertex buffer/s
         SDL_GPUBufferBinding vertexBinding = {sceneVertexBuffer, 0};
@@ -1648,17 +1743,10 @@ SDL_AppResult App::OnRender() {
 
     SDL_EndGPURenderPass(renderPass);
 
-    if
-    (
-
-
-        !
-        SDL_SubmitGPUCommandBuffer(commandBuffer)
-    ) {
+    if (!SDL_SubmitGPUCommandBuffer(commandBuffer)) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to submit command buffer: %s", SDL_GetError());
         return FAILURE;
     }
 
-    return
-            CONTINUE;
+    return CONTINUE;
 }

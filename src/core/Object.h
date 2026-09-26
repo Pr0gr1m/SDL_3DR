@@ -75,34 +75,13 @@ public:
 
     ///Pointer to object's mesh
     Mesh *mesh;
+    
     ///Objects world position
     Vector Position;
 
     ///Objects rotation matrix
     Matrix3D rotationMatrix3D{};
-
-    ///Objects acceleration
-    Vector acceleration{};
-    ///Objects velocity
-    Vector velocity{};
-
-    ///Objects mass
-    float mass = 1;
-
-    /**
-     *Adds force divided by mass to acceleration
-     *@param force Force vector
-    */
-    void AddForceAcceleration(Vector force);
-
-    bool operator==(const Object &object) const {
-        return mesh == object.mesh && Position == object.Position;
-    }
 };
-
-inline void Object::AddForceAcceleration(Vector force) {
-    this->acceleration += (force / mass);
-}
 
 
 #endif //SDL1_OBJECT_H
