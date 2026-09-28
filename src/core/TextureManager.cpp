@@ -4,7 +4,7 @@
 
 SDL_Surface *TextureManager::loadSurfaceFromTexture(const char *localPathTo) {
     std::string fullPath = std::string(basePath) + localPathTo;
-    SDL_Log("Loading texture: %s", fullPath.c_str());
+    SLog1("Loading texture: %s", fullPath.c_str());
 
     SDL_IOStream *textureStream = SDL_IOFromFile(fullPath.c_str(), "rb");
 

@@ -39,30 +39,6 @@ public:
         Dxil, //unused
     };
 
-    // /**
-    //  * @struct LODDBLock
-    //  * @brief Represents a block after LOD
-    //  */
-    // struct LODDBLock {
-    //     struct LODDBlock {
-    //         std::array<Face, 12> faces;
-    //
-    //         LODDBlock() = default;
-    //
-    //         LODDBlock(std::array<Face, 12> faces) : faces(faces) {
-    //         }
-    //     };
-    // };
-    // /**
-    //  * @struct ChunkMeshCache
-    //  * @brief Represents cached chunk mesh made up of LODDBlocks
-    //  */
-    // struct ChunkMeshCache {
-    //     std::vector<LODDBLock> lodBlocks;
-    //     int cachedLOD = -1;
-    //     bool isValidCache = false;
-    // };
-
     //TODO: implement further from deepsek
     std::vector<ChunkMeshCache> cachedChunkMeshes;
 
@@ -132,7 +108,7 @@ private:
         if (ChunkManager::smallestChunkSizeLogNumber == 1) return 0;
 
         auto LOD = static_cast<int>(std::ceil(1.2f * distance / ChunkManager::chunkSizeXYZ)) - 1; //[0, infinity)
-        SDL_Log("For distance %f lod is %i", distance, LOD);
+        SLog2("For distance %f lod is %i", distance, LOD);
         // if (LOD <= 0) return 1;
         if (std::pow(ChunkManager::smallestChunkSizeLogNumber, LOD) >= ChunkManager::chunkSizeXYZ) //This could be a (f.e hash) table
             return static_cast<int>(log(ChunkManager::chunkSizeXYZ) / log(ChunkManager::smallestChunkSizeLogNumber));
@@ -149,7 +125,7 @@ private:
      * @param fullDebug Full debug?
      * @return If success, returns a raycasthit with collision information else returns RaycastHit_NULL
      */
-    [[nodiscard]] RaycastHit RaycastRay(Vector origin, Vector dir, float maxDistance = 1, bool fullDebug = false) const;
+    [[nodiscard]] RaycastHit RaycastRay(Vector origin, Vector dir, float maxDistance = 1) const;
 
     SDL_GPUBuffer *sceneVertexBuffer = nullptr;
     size_t lastSceneVertexBufferDataSize = 0;

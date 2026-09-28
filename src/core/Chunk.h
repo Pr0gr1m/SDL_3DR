@@ -14,6 +14,7 @@
 **/
 struct LODDBLock {
     std::array<Face, 12> faces{};
+    std::byte numFaces{};
 
     LODDBLock() = default;
 
@@ -58,20 +59,20 @@ public:
         return x >= 0 && x < N && y >= 0 && y < N && z >= 0 && z < N;
     }
 
-    [[nodiscard]] static constexpr int index(int x, int y, int z) {
+    [[nodiscard]] static constexpr int chunkIndex(int x, int y, int z) {
         return (y * N + z) * N + x;
     }
 
     void tryInsert(const Vector &p, Object object) {
         const int x = toInt(p.x), y = toInt(p.y), z = toInt(p.z);
         if (!isPosInBounds(x, y, z)) return;
-        blocks[index(x, y, z)] = object;
+        blocks[chunkIndex(x, y, z)] = object;
     }
 
     [[nodiscard]] std::optional<Object> *tryGet(const Vector &p) {
         const int x = toInt(p.x), y = toInt(p.y), z = toInt(p.z);
         if (!isPosInBounds(x, y, z)) return nullptr;
-        return &blocks[index(x, y, z)];
+        return &blocks[chunkIndex(x, y, z)];
     }
 
     [[nodiscard]] const std::optional<Object> *tryGet(const Vector &p) const {
@@ -81,13 +82,13 @@ public:
     [[nodiscard]] std::optional<Object> &operator[](const Vector &p) {
         const int x = toInt(p.x), y = toInt(p.y), z = toInt(p.z);
         assert(isPosInBounds(x, y, z)); //assert to not overflow
-        return blocks[index(x, y, z)];
+        return blocks[chunkIndex(x, y, z)];
     }
 
     [[nodiscard]] const std::optional<Object> &operator[](const Vector &p) const {
         const int x = toInt(p.x), y = toInt(p.y), z = toInt(p.z);
         assert(isPosInBounds(x, y, z)); //assert to not overflow
-        return blocks[index(x, y, z)];
+        return blocks[chunkIndex(x, y, z)];
     }
 
     [[nodiscard]] bool isEmpty() const {
