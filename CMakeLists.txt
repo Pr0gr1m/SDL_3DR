@@ -29,6 +29,7 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/core/Face.cpp
         src/core/Face.h
         src/GlobalVariables.h
+        src/core/ChunkCache.h
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

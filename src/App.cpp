@@ -48,7 +48,6 @@ inline constexpr int groundZeroYLevel = -2; //only 1 chunk for test
 inline constexpr float halfChunk = ChunkManager::chunkSizeXYZ / 2.0f;
 
 //TODO: Before full release, change CMakeList.txt to put built shaders in build dir
-//TODO: Improve RaycastRay accuracy / reliability
 //TODO: Add caching to texture manager, maybe some CMake commands to recache
 //TODO: Optimize with diff. cullings
 //TODO: Add screen space GI?
@@ -1404,28 +1403,34 @@ SDL_AppResult App::OnRender() {
                       const int maxBlockCountInLOD = LODBlockSize * LODBlockSize * LODBlockSize;
                       const int cellsPerAxis = ChunkManager::chunkSizeXYZ / LODBlockSize;
 
+
                       //Ignore empty chunks (f.e sky or ungenerated underground)
                       if (chunk.isEmpty()) return;
 
+                      //Index of a 3D list as integer
+                      auto index3D = [](int cx, int cy, int cz) {
+                          return (cy * ChunkManager::chunkSizeXYZ + cz) * ChunkManager::chunkSizeXYZ + cx;
+                      };
+
                       //Prefill a 3D grid for faster access within the chunk
-                      bool blockPresence[ChunkManager::chunkSizeXYZ][ChunkManager::chunkSizeXYZ][ChunkManager::chunkSizeXYZ]{};
-                      for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
-                          for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += 1) {
-                              for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
-                                  const auto blockAt = chunk.tryGet(Vector(x, y, z));
+                      std::array<bool, ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ> blockPresence;
 
-                                  // bool renderFace = true;
-                                  // if (x != 0 && x != ChunkManager::chunkSizeXYZ) //&& x != ChunkManager::chunkSizeXYZ - 1) {
-                                  // {
-                                  //     chunk.tryGet(Vector(x - 1, y, z));
-                                  // }
+                      //Rebuild block presence only when chunk cache is invalid
+                      if (!chunk.cache.isValidCache) {
+                          for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
+                              for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += 1) {
+                                  for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
+                                      const auto blockAt = chunk.tryGet(Vector(x, y, z));
 
-                                  if (blockAt != nullptr && blockAt->has_value())
-                                      blockPresence[x][y][z] = true;
-                                  else
-                                      blockPresence[x][y][z] = false;
+                                      if (blockAt != nullptr && blockAt->has_value())
+                                          blockPresence[index3D(x, y, z)] = true;
+                                      else
+                                          blockPresence[index3D(x, y, z)] = false;
+                                  }
                               }
                           }
+                      } else {
+                          blockPresence = chunk.cache.cachedBlockPresence;
                       }
 
                       for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += LODBlockSize) {
@@ -1440,36 +1445,36 @@ SDL_AppResult App::OnRender() {
                                       if (x != 0) {
                                           const auto blockAt = chunk.tryGet(Vector(x - 1, y, z));
                                           if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[x - 1][y][z] = true;
+                                              blockPresence[index3D(x - 1, y, z)] = true;
                                       }
 
-                                      if (x != ChunkManager::chunkSizeXYZ) {
+                                      if (x != ChunkManager::chunkSizeXYZ - 1) {
                                           const auto blockAt = chunk.tryGet(Vector(x + 1, y, z));
                                           if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[x + 1][y][z] = true;
+                                              blockPresence[index3D(x + 1, y, z)] = true;
                                       }
 
                                       if (y != 0) {
                                           const auto blockAt = chunk.tryGet(Vector(x, y - 1, z));
                                           if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[x][y - 1][z] = true;
+                                              blockPresence[index3D(x, y - 1, z)] = true;
                                       }
 
-                                      if (y != ChunkManager::chunkSizeXYZ) {
+                                      if (y != ChunkManager::chunkSizeXYZ - 1) {
                                           const auto blockAt = chunk.tryGet(Vector(x, y + 1, z));
                                           if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[x][y + 1][z] = true;
+                                              blockPresence[index3D(x, y + 1, z)] = true;
                                       }
                                       if (x != 0) {
                                           const auto blockAt = chunk.tryGet(Vector(x, y, z - 1));
                                           if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[x][y][z - 1] = true;
+                                              blockPresence[index3D(x, y, z - 1)] = true;
                                       }
 
-                                      if (x != ChunkManager::chunkSizeXYZ) {
+                                      if (x != ChunkManager::chunkSizeXYZ - 1) {
                                           const auto blockAt = chunk.tryGet(Vector(x, y, z + 1));
                                           if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[x][y][z + 1] = true;
+                                              blockPresence[index3D(x, y, z + 1)] = true;
                                       }
                                   }
 
@@ -1477,7 +1482,7 @@ SDL_AppResult App::OnRender() {
                                   for (int yObj = 0; yObj < currentLODY; yObj++) {
                                       for (int xObj = 0; xObj < currentLODX; xObj++) {
                                           for (int zObj = 0; zObj < currentLODZ; zObj++) {
-                                              if (blockPresence[x + xObj][y + yObj][z + zObj]) {
+                                              if (blockPresence[index3D(x + xObj, y + yObj, z + zObj)]) {
                                                   blockCount++;
                                               }
                                           }
@@ -1488,12 +1493,18 @@ SDL_AppResult App::OnRender() {
                                       Vector LODBlockBoundMin = chunk.atPosition + Vector(x, y, z);
                                       Vector LODBlockBoundMax = LODBlockBoundMin + Vector(currentLODX, currentLODY, currentLODZ);
 
+                                      bool isBlockVisible = true;
                                       for (const auto &plane: sceneCamera->frustrumPlanes) {
                                           const float x = (plane.A > 0) ? LODBlockBoundMax.x : LODBlockBoundMin.x;
                                           const float y = (plane.B > 0) ? LODBlockBoundMax.y : LODBlockBoundMin.y;
                                           const float z = (plane.C > 0) ? LODBlockBoundMax.z : LODBlockBoundMin.z;
-                                          if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0) continue;
+                                          if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0) {
+                                              isBlockVisible = false;
+                                              break;
+                                          }
                                       }
+
+                                      if (!isBlockVisible) continue;
 
                                       const float minX = static_cast<float>(x) - kBlockHalfExtent;
                                       const float minY = static_cast<float>(y) - kBlockHalfExtent;
@@ -1534,7 +1545,12 @@ SDL_AppResult App::OnRender() {
                           }
                       }
 
-                      chunk.cache.lodBlocks = std::move(chunkLocalBlocks); //lod blocks have global lifetime so they should have blocks moved into
+                      //Only populate cached chunk block presence if chunk was previously invalid
+                      if (!chunk.cache.isValidCache) {
+                          chunk.cache.cachedBlockPresence = std::move(blockPresence);
+                      }
+
+                      chunk.cache.lodBlocks = std::move(chunkLocalBlocks); //lod blocks have global lifetime so they should have blocks moved into cache
                       chunkLODBlocks[idx] = chunk.cache.lodBlocks;
 
                       chunk.cache.cachedLOD = LOD;
@@ -1542,58 +1558,9 @@ SDL_AppResult App::OnRender() {
                   }
     );
 
-
     SLog1("Frustrum culling took: %llu ms...", (SDL_GetTicks()-startTicks));
 
     startTicks = SDL_GetTicks();
-    // std::vector<Face> chunkFaces;
-    // std::atomic faceIdx = 0;
-    // std::for_each(std::execution::par, chunkLODDBLocks.begin(), chunkLODDBLocks.end(), [&](std::map<Vector, LODDBlock> &map) {
-    //     if (map.empty()) return;
-    //
-    //     //axis y
-    //     for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
-    //         for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
-    //             Face bottomFaces[2];
-    //             Face topFaces[2];
-    //
-    //             for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += 1) {
-    //                 if (map.contains(Vector(x, y, z))) {
-    //                     const auto &block = map.at(Vector(x, y, z));
-    //                     if (y == 0) {
-    //                         bottomFaces[0] = block.faces[2];
-    //                         bottomFaces[1] = block.faces[3];
-    //                     } else {
-    //                         topFaces[0] = block.faces[0];
-    //                         topFaces[1] = block.faces[1];
-    //                     }
-    //                 } else {
-    //                     LODDBlock block{};
-    //
-    //                     if (y == 0) {
-    //                         block = map.at(Vector(x, y, z));
-    //                     } else {
-    //                         block = map.at(Vector(x, y - 1, z));
-    //                     }
-    //
-    //                     topFaces[0] = block.faces[0];
-    //                     topFaces[1] = block.faces[1];
-    //
-    //                     break;
-    //                 }
-    //             }
-    //
-    //             //SDL_Log("X : %i , Z : %i B : {%f,%f,%f}", x, z, bottomFaces[0].globalPoint1.x, bottomFaces[0].globalPoint1.y, bottomFaces[0].globalPoint1.z);
-    //
-    //             chunkFaces.push_back(bottomFaces[0]);
-    //             chunkFaces.push_back(bottomFaces[1]);
-    //             chunkFaces.push_back(topFaces[0]);
-    //             chunkFaces.push_back(topFaces[1]);
-    //
-    //             totalVertexNumber.fetch_add(4 * 2);
-    //         }
-    //     }
-    // });
 
     SLog1("Greedy meshing took: %llu ms...", (SDL_GetTicks() - startTicks));;
 
@@ -1609,8 +1576,10 @@ SDL_AppResult App::OnRender() {
     SLog1("Num of verticies total: %zi", lineStartVertex);
 
     if (totalUploadedVertexNumber > 0) {
-        totalFPS += static_cast<int>(1000 / deltaTimeMS);
-        numFPS += 1;
+        if (deltaTimeMS != 0) {
+            totalFPS += static_cast<int>(1000 / deltaTimeMS);
+            numFPS += 1;
+        }
 
         std::vector<Vertex3D> verticies(totalUploadedVertexNumber);
 
@@ -1642,12 +1611,6 @@ SDL_AppResult App::OnRender() {
             auto start = cpyIndex.fetch_add(3);
             memcpy(verticies.data() + start, drawcallVerts.data(), 3 * sizeof(Vertex3D));
         });
-
-        // std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
-        //     auto linecallVerts = face.GetFaceLineCallVerticies();
-        //     auto start = cpyIndex.fetch_add(6);
-        //     memcpy(verticies.data() + start, linecallVerts.data(), 6 * sizeof(Vertex3D));
-        // });
 
         if (sceneVertexBuffer == nullptr) {
             SDL_GPUBufferCreateInfo bufferInfo{};

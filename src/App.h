@@ -39,9 +39,6 @@ public:
         Dxil, //unused
     };
 
-    //TODO: implement further from deepsek
-    std::vector<ChunkMeshCache> cachedChunkMeshes;
-
     /**
      * @struct LoadedShaderBinary
      * @brief Describes a compiled and loaded shader binary

@@ -3,34 +3,10 @@
 #include <cassert>
 #include <optional>
 
-#include "Face.h"
+#include "ChunkCache.h"
 #include "GlobalVariables.h"
 #include "Object.h"
 #include "Vector.h"
-
-/**
- * @struct LODDBLock
- * @brief Represents a block after LOD
-**/
-struct LODDBLock {
-    std::array<Face, 12> faces{};
-    std::byte numFaces{};
-
-    LODDBLock() = default;
-
-    LODDBLock(std::array<Face, 12> faces) : faces(faces) {
-    }
-};
-
-/**
-* @struct ChunkMeshCache
-* @brief Represents cached chunk mesh made up of LODDBlocks.
- **/
-struct ChunkMeshCache {
-    std::vector<LODDBLock> lodBlocks;
-    int cachedLOD = -1;
-    bool isValidCache = false;
-};
 
 /**
  *@class Chunk
@@ -47,7 +23,7 @@ public:
     bool didUserEditChunk{};
 
     ///Cached chunk mesh
-    ChunkMeshCache cache;
+    ChunkMeshCache<N> cache;
 
     Chunk() = default;
 
@@ -69,12 +45,14 @@ public:
         blocks[chunkIndex(x, y, z)] = object;
     }
 
+    ///Returns optional Object at relative position in the chunk
     [[nodiscard]] std::optional<Object> *tryGet(const Vector &p) {
         const int x = toInt(p.x), y = toInt(p.y), z = toInt(p.z);
         if (!isPosInBounds(x, y, z)) return nullptr;
         return &blocks[chunkIndex(x, y, z)];
     }
 
+    ///Returns optional Object at relative position in the chunk
     [[nodiscard]] const std::optional<Object> *tryGet(const Vector &p) const {
         return const_cast<Chunk *>(this)->tryGet(p);
     }
