@@ -3,10 +3,13 @@
 #include <vector>
 #include <SDL3/SDL.h>
 
+#include "ChunkMeshStore.h"
+#include "FrameProfiler.h"
 #include "core/Ray.h"
 #include "core/Chunk.h"
 #include "core/ChunkManager.h"
 #include "core/TextureManager.h"
+#include "core/Vertex3D.h"
 
 /**
  * @class App
@@ -55,6 +58,8 @@ public:
     Uint64 currentMillisecondsSinceStart;
 
 private:
+    static constexpr size_t kFreeModeProfilerWindowFrames = 600;
+
     std::unique_ptr<SDL_Window, decltype(&SDL_DestroyWindow)> m_Window;
     std::unique_ptr<SDL_GPUDevice, decltype(&SDL_DestroyGPUDevice)> m_gpuDevice;
 
@@ -95,23 +100,6 @@ private:
     // void ConstructChunkAt(int, int, bool flat = false) const;
     void ConstructChunkAtLine(Vector, bool flat = false) const;
 
-    //LOD 0: 1 block because n^0 = 1
-    //LOD 1: smallesChunkSizeLogNumber because n^1 = n
-    //LOD 2: smallesChunkSizeLogNumber^2
-    //In conclusion, min LOD is 0 and max LOD is log chunkSizeXYZ with base of smallesChunkSizeLogNumber
-    //F.e with chunk size of 16, which is not prime, smallest log number is 2 so max lod is 4 (2^4 = 16)
-    //But if chunk size is prime number like 7, smallest log number will be 1 and no LOD effect can be applied, so this can be standalone scenario
-    [[nodiscard]] static int GetLevelOfDetailFromDistance(float distance) {
-        if (ChunkManager::smallestChunkSizeLogNumber == 1) return 0;
-
-        auto LOD = static_cast<int>(std::ceil(1.2f * distance / ChunkManager::chunkSizeXYZ)) - 1; //[0, infinity)
-        SLog2("For distance %f lod is %i", distance, LOD);
-        // if (LOD <= 0) return 1;
-        if (std::pow(ChunkManager::smallestChunkSizeLogNumber, LOD) >= ChunkManager::chunkSizeXYZ) //This could be a (f.e hash) table
-            return static_cast<int>(log(ChunkManager::chunkSizeXYZ) / log(ChunkManager::smallestChunkSizeLogNumber));
-        return LOD;
-    }
-
     [[nodiscard]] RaycastHit CheckIsPointInsideAny(Vector) const;
 
     /**
@@ -124,13 +112,10 @@ private:
      */
     [[nodiscard]] RaycastHit RaycastRay(Vector origin, Vector dir, float maxDistance = 1) const;
 
-    SDL_GPUBuffer *sceneVertexBuffer = nullptr;
-    size_t lastSceneVertexBufferDataSize = 0;
+    std::unique_ptr<ChunkMeshStore> chunkMeshStore;
 
-    Uint32 sceneVertexBufferSize = 0;
     SDL_GPUGraphicsPipeline *graphicsPipeline = nullptr;
     SDL_GPUGraphicsPipeline *lineGraphicsPipeline = nullptr;
-    SDL_GPUBuffer *uniformBuffer = nullptr;
 
     SDL_GPUTexture *depthTexture = nullptr;
 
@@ -144,6 +129,19 @@ private:
     const char *kVertexShaderPath = {"shaders/vertex.spv"};
     const char *kFragmentShaderPath = {"shaders/fragment.spv"};
 
-    size_t totalFPS;
-    int numFPS;
+    FrameProfiler frameProfiler{kFreeModeProfilerWindowFrames};
+    const char *presentModeName = "unknown";
+
+    bool benchmarkActive = false;
+    Uint64 benchmarkFrame = 0;
+    Vector benchmarkSavedPosition;
+
+    ///Toggles the deterministic camera orbit used for timing comparisons
+    void ToggleBenchmark();
+
+    ///Places the camera on the benchmark path for the current benchmark frame
+    void ApplyBenchmarkPose() const;
+
+    ///Logs the profiler header describing mode, present mode, build and world size
+    void LogProfilerHeader() const;
 };

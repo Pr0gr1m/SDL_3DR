@@ -18,4 +18,6 @@ public:
     Vector Tangent;
 };
 
+static_assert(sizeof(Vertex3D) == 60, "Vertex3D must match the packed GPU vertex layout");
+
 #endif //SDL1_VERTEX3D_H

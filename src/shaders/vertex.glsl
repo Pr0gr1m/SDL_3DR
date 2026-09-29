@@ -62,6 +62,7 @@ layout (location = 4) in vec3 a_tangent;
 
 layout (row_major, set = 1, binding = 0) uniform Uniforms {
     mat4 viewProjection;
+    vec4 chunkOffset;
 } ubo;
 
 layout (location = 0) out vec4 v_color;
@@ -71,7 +72,7 @@ layout (location = 3) out vec3 v_tangent;
 
 void main()
 {
-    gl_Position = ubo.viewProjection * vec4(a_position, 1.0);
+    gl_Position = ubo.viewProjection * vec4(a_position + ubo.chunkOffset.xyz, 1.0);
     v_color = a_color;
     v_normal = a_normal;
     v_texcoord = a_texcoord;

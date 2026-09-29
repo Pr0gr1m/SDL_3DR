@@ -10,9 +10,9 @@
 #include <cmath>
 #include <cstring>
 #include <string>
-#include <execution>
 #include <limits>
 #include <list>
+#include <optional>
 #include <ranges>
 #include <utility>
 
@@ -20,6 +20,7 @@
 #include "core/Vector.h"
 #include "core/Camera.h"
 #include "core/Chunk.h"
+#include "core/ChunkMesher.h"
 #include "core/Matrix4D.h"
 #include "core/Vertex3D.h"
 
@@ -38,13 +39,10 @@ Vector startingCameraPos = Vector(0.f, 50.f, 0.f);
 Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
 std::unique_ptr<Camera> sceneCamera = nullptr;
 
-inline constexpr bool chunkFaceCulling = false; //on average it is better to keep true (For now)
-inline constexpr bool canCreateVertexBufferEveryFrame = false; //on average it is better to keep false (For now)
 inline constexpr Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
 inline constexpr float cameraMinYPosition = -5;
 inline constexpr float epsilon = +0.0001f;
 inline constexpr int groundZeroYLevel = -2; //only 1 chunk for test
-inline constexpr float halfChunk = ChunkManager::chunkSizeXYZ / 2.0f;
 
 //TODO: Before full release, change CMakeList.txt to put built shaders in build dir
 //TODO: Add caching to texture manager, maybe some CMake commands to recache
@@ -61,12 +59,76 @@ namespace {
         return direction.Normalized();
     }
 
-    int BlockCoordinateFromPoint(const float point) {
-        return static_cast<int>(std::floor(point + kBlockHalfExtent));
+    inline constexpr Uint64 kBenchmarkHoldFrames = 300;
+    inline constexpr Uint64 kBenchmarkRevolutionFrames = 600;
+    inline constexpr Uint64 kBenchmarkLoopFrames = kBenchmarkHoldFrames + kBenchmarkRevolutionFrames;
+    inline constexpr float kBenchmarkOrbitRadius = 28.f;
+    inline constexpr float kBenchmarkCameraHeight = 30.f;
+
+    struct BenchmarkPose {
+        Vector position;
+        Vector lookDegrees;
+    };
+
+    //Orbit around the middle of the four starting chunks; holds still for the first frames of every loop
+    BenchmarkPose BenchmarkPoseForFrame(const Uint64 frame) {
+        const Vector orbitCentre(15.5f, 3.f, 15.5f);
+        const Uint64 loopFrame = frame % kBenchmarkLoopFrames;
+        const float angle = loopFrame < kBenchmarkHoldFrames
+                                ? 0.f
+                                : 2.f * static_cast<float>(M_PI) * static_cast<float>(loopFrame - kBenchmarkHoldFrames) / static_cast<float>(kBenchmarkRevolutionFrames);
+
+        const Vector position(orbitCentre.x + kBenchmarkOrbitRadius * std::sin(angle), kBenchmarkCameraHeight, orbitCentre.z + kBenchmarkOrbitRadius * std::cos(angle));
+        const Vector direction = (orbitCentre - position).Normalized();
+
+        //Inverse of the forward vector in Camera::UpdateDirectionVectors
+        const float pitchDegrees = std::asin(direction.y) / DEG_2_RAD;
+        const float yawDegrees = std::atan2(direction.x, -direction.z) / DEG_2_RAD;
+        return {position, Vector(pitchDegrees, yawDegrees, 0.f)};
     }
 
-    int ChunkCoordinateFromBlockCoordinate(const int blockCoordinate) {
-        return static_cast<int>(std::floor(static_cast<float>(blockCoordinate) / ChunkManager::chunkSizeXYZ)) * ChunkManager::chunkSizeXYZ;
+    //Must match the Uniforms block in vertex.glsl (std140: mat4 followed by vec4)
+    struct ChunkUniforms {
+        float viewProjection[16];
+        float chunkOffset[4];
+    };
+
+    static_assert(sizeof(ChunkUniforms) == 80, "ChunkUniforms must match the vertex shader uniform block");
+
+    //Blocks are centred on integer coordinates, so a chunk spans [atPosition - 0.5, atPosition + chunkSize - 0.5] on every axis
+    bool IsChunkInFrustum(const Camera &camera, const Int3 &chunkLookup) {
+        const float minCorner[3] = {
+            static_cast<float>(chunkLookup.a) - kBlockHalfExtent,
+            static_cast<float>(chunkLookup.b) - kBlockHalfExtent,
+            static_cast<float>(chunkLookup.c) - kBlockHalfExtent
+        };
+        constexpr float chunkExtent = static_cast<float>(ChunkManager::chunkSizeXYZ);
+
+        for (const auto &plane: camera.frustrumPlanes) {
+            //Corner furthest along the plane normal, if even that one is behind the plane the box is outside
+            const float x = plane.A >= 0.f ? minCorner[0] + chunkExtent : minCorner[0];
+            const float y = plane.B >= 0.f ? minCorner[1] + chunkExtent : minCorner[1];
+            const float z = plane.C >= 0.f ? minCorner[2] + chunkExtent : minCorner[2];
+            if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0.f) return false;
+        }
+
+        return true;
+    }
+
+#ifdef __VERSION__
+    inline constexpr const char *kCompilerVersion = __VERSION__;
+#else
+    inline constexpr const char *kCompilerVersion = "unknown";
+#endif
+
+#ifdef NDEBUG
+    inline constexpr const char *kNdebugState = "defined";
+#else
+    inline constexpr const char *kNdebugState = "not defined";
+#endif
+
+    int BlockCoordinateFromPoint(const float point) {
+        return static_cast<int>(std::floor(point + kBlockHalfExtent));
     }
 
     Vector BlockPositionFromPoint(const Vector &point) {
@@ -75,14 +137,6 @@ namespace {
             static_cast<float>(BlockCoordinateFromPoint(point.y)),
             static_cast<float>(BlockCoordinateFromPoint(point.z))
         );
-    }
-
-    Int3 ChunkLookupFromBlockPosition(const Vector &blockPosition) {
-        return {
-            ChunkCoordinateFromBlockCoordinate(static_cast<int>(blockPosition.x)),
-            ChunkCoordinateFromBlockCoordinate(static_cast<int>(blockPosition.y)),
-            ChunkCoordinateFromBlockCoordinate(static_cast<int>(blockPosition.z))
-        };
     }
 
     [[deprecated]] [[maybe_unused]] void MoveCameraLocal(const Vector &localDirection, const float distance) {
@@ -231,12 +285,17 @@ SDL_AppResult App::Init() {
     }
 
     SDL_GPUPresentMode presentMode = SDL_GPU_PRESENTMODE_VSYNC; //VSYNC is supported everywhere, but if mailbox is supported use it as its faster
+    presentModeName = "VSYNC";
     if (SDL_WindowSupportsGPUPresentMode(m_gpuDevice.get(), m_Window.get(), SDL_GPU_PRESENTMODE_MAILBOX)) {
         presentMode = SDL_GPU_PRESENTMODE_MAILBOX;
+        presentModeName = "MAILBOX";
     }
 
     SLog2("Setting GPU swapchain parameters %llu ms...", SDL_GetTicks());
-    SDL_SetGPUSwapchainParameters(m_gpuDevice.get(), m_Window.get(), SDL_GPU_SWAPCHAINCOMPOSITION_SDR, presentMode);
+    if (!SDL_SetGPUSwapchainParameters(m_gpuDevice.get(), m_Window.get(), SDL_GPU_SWAPCHAINCOMPOSITION_SDR, presentMode)) {
+        SDL_LogWarn(APP_LOG_CATEGORY_GENERIC, "Failed to set swapchain present mode %s: %s", presentModeName, SDL_GetError());
+        presentModeName = "unknown";
+    }
 
     //Exit out of build directory
     std::string vPath = std::string(basePath) + kVertexShaderPath; //"/shaders/vertex.spv";
@@ -525,6 +584,11 @@ SDL_AppResult App::Init() {
 
     SLog1("%zu chunks", chunkManager->worldChunks.size());
 
+    chunkMeshStore = std::make_unique<ChunkMeshStore>(m_gpuDevice.get());
+
+    frameProfiler.StartWindow(kFreeModeProfilerWindowFrames, "free");
+    LogProfilerHeader();
+
     delete noise;
     noise = nullptr;
 
@@ -545,7 +609,9 @@ SDL_AppResult App::Init() {
 }
 
 SDL_AppResult App::Iterate() {
-    if (sceneCamera != nullptr) {
+    frameProfiler.BeginFrame();
+
+    if (sceneCamera != nullptr && !benchmarkActive) {
         MoveCameraBasedOnStates();
     }
 
@@ -604,6 +670,10 @@ SDL_AppResult App::Event(const SDL_Event *event) {
                 sceneCamera->UpdateCameraFrustrumCorners();
             }
 
+            if (event->key.key == SDLK_B && !event->key.repeat) {
+                ToggleBenchmark();
+            }
+
             break;
         case SDL_EVENT_KEY_UP:
             if (event->key.key == SDLK_W && !event->key.down) {
@@ -642,60 +712,7 @@ SDL_AppResult App::Event(const SDL_Event *event) {
                 SDL_Log("Camera looking at %f,%f,%f", cameraLookVector.x, cameraLookVector.y, cameraLookVector.z);
                 auto result = RaycastRay(sceneCamera->Position, cameraLookVector.Normalized(), 5);
                 if (result.hit) {
-                    const Int3 chunkLookup = ChunkLookupFromBlockPosition(result.blockPosition);
-                    auto iterator = chunkManager->chunkMap.find(chunkLookup);
-
-                    if (iterator == chunkManager->chunkMap.end()) {
-                        const size_t newChunkIndex = chunkManager->worldChunks.size();
-                        chunkManager->worldChunks.emplace_back(chunkLookup.toVector());
-                        iterator = chunkManager->chunkMap.insert({chunkLookup, newChunkIndex}).first;
-                    }
-
-                    auto &chunk = chunkManager->worldChunks[iterator->second];
-                    const Vector localBlockPosition = result.blockPosition - chunk.atPosition;
-
-                    auto blockAt = chunk.tryGet(localBlockPosition);
-                    if (blockAt != nullptr && blockAt->has_value()) {
-                        blockAt->reset();
-                    }
-
-                    // auto blockIter = chunk.blocks.begin();
-                    // while (blockIter != chunk.blocks.end()) {
-                    //     auto block = *blockIter;
-                    //     if (block.has_value() && block.value().Position == result.blockPosition) block.reset();
-                    // }
-                    // if (blockIter != chunk.blocks.end()) {
-                    //     // chunk.blocks.erase(blockIter);
-                    // }
-
-                    // chunk.blocks[localBlockPosition] = Object{cubeMesh.get(), worldBlockPosition};
-                    // const Vector towerBase = result.blockPosition + Vector(0.f, 1.f, 0.f);
-                    // const std::array<Vector, 4> towerOffsets = {
-                    //     Vector(0.f, 0.f, 0.f),
-                    //     Vector(1.f, 0.f, 0.f),
-                    //     Vector(1.f, 0.f, 1.f),
-                    //     Vector(0.f, 0.f, 1.f)
-                    // };
-                    //
-                    // for (const Vector &towerOffset: towerOffsets) {
-                    //     for (int i = 0; i < 5; i += 1) {
-                    //         const Vector worldBlockPosition = towerBase + towerOffset + Vector(0.f, static_cast<float>(i), 0.f);
-                    //         const Int3 chunkLookup = ChunkLookupFromBlockPosition(worldBlockPosition);
-                    //         auto iterator = chunkManager->chunkMap.find(chunkLookup);
-                    //         if (iterator == chunkManager->chunkMap.end()) {
-                    //             const size_t newChunkIndex = chunkManager->worldChunks.size();
-                    //             chunkManager->worldChunks.emplace_back(chunkLookup.toVector());
-                    //             iterator = chunkManager->chunkMap.insert({chunkLookup, newChunkIndex}).first;
-                    //         }
-                    //
-                    //         auto &chunk = chunkManager->worldChunks[iterator->second];
-                    //         const Vector localBlockPosition = worldBlockPosition - chunk.atPosition;
-                    //
-                    //         SDL_Log("Adding block at %f,%f,%f", worldBlockPosition.x, worldBlockPosition.y, worldBlockPosition.z);
-                    //         chunk.blocks[localBlockPosition] = Object{cubeMesh.get(), worldBlockPosition};
-                    //         chunk.didUserEditChunk = true;
-                    //     }
-                    // }
+                    chunkManager->removeBlock(result.blockPosition);
                 }
             }
             break;
@@ -704,6 +721,8 @@ SDL_AppResult App::Event(const SDL_Event *event) {
         //     break;
 
         case SDL_EVENT_MOUSE_MOTION:
+            if (benchmarkActive) break;
+
             degreesCameraEulerAngle.y += (event->motion.xrel) * kMouseLookSensitivity;
             degreesCameraEulerAngle.x -= (event->motion.yrel) * kMouseLookSensitivity;
             degreesCameraEulerAngle.x = std::clamp(degreesCameraEulerAngle.x, -89.0f, 89.0f);
@@ -719,22 +738,15 @@ SDL_AppResult App::Event(const SDL_Event *event) {
 }
 
 void App::Quit(SDL_AppResult result) {
-    //Disable compiler warn about unused result arg: https://stackoverflow.com/questions/58019275/what-is-the-purpose-of-voidvariable-in-c
-    //(void) result;
-
-    SDL_Log("Average FPS during rendering: %f", static_cast<float>(totalFPS / numFPS));
+    frameProfiler.Report();
 
     auto quitStartTicks = SDL_GetTicks();
     SLog1("Quit event, freeing memory");
 
     SDL_WaitForGPUIdle(m_gpuDevice.get()); //Block thread until GPU is idle
 
-    if (sceneVertexBuffer) {
-        SDL_ReleaseGPUBuffer(m_gpuDevice.get(), sceneVertexBuffer);
-    }
-
-    if (uniformBuffer) {
-        SDL_ReleaseGPUBuffer(m_gpuDevice.get(), uniformBuffer);
+    if (chunkMeshStore) {
+        chunkMeshStore->ReleaseAll();
     }
 
     if (graphicsPipeline) {
@@ -783,6 +795,38 @@ void App::Quit(SDL_AppResult result) {
 }
 
 App::~App() = default;
+
+void App::ToggleBenchmark() {
+    if (sceneCamera == nullptr) return;
+
+    benchmarkActive = !benchmarkActive;
+
+    if (benchmarkActive) {
+        benchmarkSavedPosition = sceneCamera->Position;
+        benchmarkFrame = 0;
+        frameProfiler.StartWindow(kBenchmarkLoopFrames, "benchmark");
+        LogProfilerHeader();
+        return;
+    }
+
+    frameProfiler.Report();
+    sceneCamera->Position = benchmarkSavedPosition;
+    RotateCameraLocal(degreesCameraEulerAngle);
+    sceneCamera->cameraVelocity = Vector(0.f, 0.f, 0.f);
+    frameProfiler.StartWindow(kFreeModeProfilerWindowFrames, "free");
+}
+
+void App::ApplyBenchmarkPose() const {
+    const BenchmarkPose pose = BenchmarkPoseForFrame(benchmarkFrame);
+    sceneCamera->Position = pose.position;
+    RotateCameraLocal(pose.lookDegrees);
+}
+
+void App::LogProfilerHeader() const {
+    SDL_Log("[Profiler] header: mode=%s present=%s NDEBUG=%s compiler=%s debugLevel=%d worldChunks=%zu chunkMap=%zu",
+            benchmarkActive ? "benchmark" : "free", presentModeName, kNdebugState, kCompilerVersion, debugLevel,
+            chunkManager ? chunkManager->worldChunks.size() : 0, chunkManager ? chunkManager->chunkMap.size() : 0);
+}
 
 // SDL_AppResult App::OnQuit() {
 // return SUCCESS;
@@ -1090,6 +1134,12 @@ SDL_AppResult App::OnUpdate() {
 
     currentMillisecondsSinceStart = SDL_GetTicks();
 
+    if (benchmarkActive) {
+        ApplyBenchmarkPose();
+        benchmarkFrame += 1;
+        return CONTINUE;
+    }
+
     sceneCamera->MoveCameraBasedOnVelocity();
 
     //if (sceneCamera->Position.y >= kCameraHeightAboveGround) {
@@ -1118,41 +1168,6 @@ SDL_AppResult App::OnUpdate() {
 }
 
 void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
-    //From -10 to 0
-
-    // Chunk<ChunkManager::chunkSizeXYZ> chunk(atPos);
-    // for (int x = 0; x < ChunkManager::chunkSizeXYZ; x++) {
-    //     for (int z = 0; z < ChunkManager::chunkSizeXYZ; z++) {
-    //         float rawNoiseVal = SimplexNoise::noise(x * noise->mFrequency, z * noise->mFrequency);
-    //         rawNoiseVal += 0.5f;
-    //         rawNoiseVal /= 2;
-    //
-    //         rawNoiseVal *= noise->mAmplitude;
-    //
-    //         // int y = flat ? 0 : (int) (noise->mAmplitude * rawNoiseVal);
-    //         int y = flat ? 0 : (int) rawNoiseVal;
-    //
-    //         //chunk.blocks[Vector(x, 0, z)] = {cubeMesh, chunk.atPosition + Vector(x, 0, z)};
-    //
-    //         // SDL_Log("x=%d, z=%d", x, z);
-    //         // const Vector pos = Vector(x, 0, z);
-    //         // SDL_Log("pos=(%f,%f,%f)", pos.x, pos.y, pos.z);
-    //         // const Object obj = {cubeMesh.get(), chunk.atPosition + Vector(x, 0, z)};
-    //         //chunk.blocks.emplace(pos, std::move(obj));
-    //
-    //         //min limit is -1 presumably
-    //         for (; y >= -1; y--) {
-    //             chunk.tryInsert(Vector(x, y, z), {cubeMesh.get(), chunk.atPosition + Vector(x, y, z)});
-    //             // chunk.blocks[Vector(x, y, z)] = std::move({cubeMesh.get(), chunk.atPosition + Vector(x, y, z)}; //for now we have either block or no block, to be replaced w enum?
-    //             //chunk.blocks.insert(Object{cubeMesh.get(), chunk.atPosition + Vector(x, y, z)}); //for now we have either block or no block, to be replaced w enum?)
-    //         }
-    //     }
-    // }
-    //
-    // chunkManager->worldChunks.push_back(std::move(chunk));
-    // chunkManager->chunkMap.insert({atPos.toInt3(), chunkManager->worldChunks.size() - 1});
-    // return;
-
     std::vector<Chunk<ChunkManager::chunkSizeXYZ> > yChunks;
     for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
         for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
@@ -1189,7 +1204,7 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
                 }
 
                 if (currentlyWorkingChunk == nullptr) {
-                    Chunk<ChunkManager::chunkSizeXYZ> newChunk(Vector(atPos.x, -(chunkI * ChunkManager::chunkSizeXYZ), atPos.y));
+                    Chunk<ChunkManager::chunkSizeXYZ> newChunk(Vector(atPos.x, -(chunkI * ChunkManager::chunkSizeXYZ), atPos.z));
                     yChunks.push_back(std::move(newChunk));
                     currentlyWorkingChunk = &yChunks.back();
 
@@ -1218,7 +1233,7 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
 
 RaycastHit App::CheckIsPointInsideAny(Vector point) const {
     const Vector worldBlockPosition = BlockPositionFromPoint(point);
-    const Int3 chunkLookup = ChunkLookupFromBlockPosition(worldBlockPosition);
+    const Int3 chunkLookup = ChunkManager::chunkLookupFromBlockPosition(worldBlockPosition);
 
     auto iterator = chunkManager->chunkMap.find(chunkLookup); //std::make_pair(chunkX, chunkZ));
     if (iterator != chunkManager->chunkMap.end()) {
@@ -1319,368 +1334,35 @@ SDL_AppResult App::OnRender() {
 
     Matrix4D viewMatrix = sceneCamera->GetViewMatrix();
     Matrix4D projectionMatrix = sceneCamera->GetProjectionMatrix();
-    Matrix4D viewProjection = projectionMatrix * viewMatrix;
 
-    float float16Array[16];
-    viewProjection.toOutFloat16Array(float16Array);
+    ChunkUniforms uniforms{};
+    (projectionMatrix * viewMatrix).toOutFloat16Array(uniforms.viewProjection);
 
-    // SDL_PushGPUVertexUniformData(
-    //     commandBuffer,
-    //     0,
-    //     float16Array,
-    //     sizeof(float16Array)
-    // );
+    std::optional<FrameProfiler::StageScope> stageScope;
+    stageScope.emplace(frameProfiler, FrameProfiler::Stage::Build);
 
-    auto getMeshDrawCallVerticies = [](Mesh *mesh) {
-        return mesh->numTriangles > 0 ? mesh->numTriangles * 3 : 0; //count numTriangles cuz triangles is what we render not verticies
-    };
+    std::vector<ChunkMeshStore::MeshUpdate> meshUpdates;
+    Uint64 bytesToUpload = 0;
+    for (auto &chunk: chunkManager->worldChunks) {
+        if (!chunk.meshDirty) continue;
 
-    auto isFaceInCameraFrustrum = [](Face *globalFace) {
-        if (globalFace == nullptr) return false;
+        std::vector<Vertex3D> vertices = buildChunkMesh(chunk, *chunkManager);
+        bytesToUpload += vertices.size() * sizeof(Vertex3D);
+        meshUpdates.push_back({chunk.atPosition.toInt3(), std::move(vertices)});
+        chunk.meshDirty = false;
+    }
+    frameProfiler.AddCount(FrameProfiler::Counter::ChunksRemeshed, meshUpdates.size());
 
-        for (const auto &plane: sceneCamera->frustrumPlanes) {
-            auto v1 = globalFace->globalPoint1;
-            auto v2 = globalFace->globalPoint2;
-            auto v3 = globalFace->globalPoint3;
-
-            //manually check 3 verticies
-            float d1 = plane.A * v1.x + plane.B * v1.y + plane.C * v1.z + plane.D;
-            float d2 = plane.A * v2.x + plane.B * v2.y + plane.C * v2.z + plane.D;
-            float d3 = plane.A * v3.x + plane.B * v3.y + plane.C * v3.z + plane.D;
-            if (d1 < 0 && d2 < 0 && d3 < 0) { return false; }
+    if (!meshUpdates.empty()) {
+        stageScope.emplace(frameProfiler, FrameProfiler::Stage::Upload);
+        if (!chunkMeshStore->Upload(commandBuffer, meshUpdates)) {
+            SDL_SubmitGPUCommandBuffer(commandBuffer);
+            return FAILURE;
         }
-        return true;
-    };
-
-    std::atomic<size_t> totalVertexNumber = 0;
-    std::atomic<size_t> totalLineVertexNumber = 0;
-
-    auto startTicks = SDL_GetTicks();
-
-    std::vector<std::vector<LODDBLock> > chunkLODBlocks;
-    chunkLODBlocks.resize(chunkManager->worldChunks.size());
-
-    std::for_each(std::execution::par, chunkManager->worldChunks.begin(), chunkManager->worldChunks.end(), [&](Chunk<ChunkManager::chunkSizeXYZ> &chunk) {
-                      size_t idx = &chunk - chunkManager->worldChunks.data();
-                      //Check if whole chunk is in camera frustrum
-
-                      Vector chunkBoundsMin = chunk.atPosition;
-                      Vector chunkBoundsMax = chunk.atPosition + Vector(ChunkManager::chunkSizeXYZ, ChunkManager::chunkSizeXYZ, ChunkManager::chunkSizeXYZ);
-
-                      bool isInsideFrustum = true;
-                      for (const auto &plane: sceneCamera->frustrumPlanes) {
-                          const float x = (plane.A > 0) ? chunkBoundsMax.x : chunkBoundsMin.x;
-                          const float y = (plane.B > 0) ? chunkBoundsMax.y : chunkBoundsMin.y;
-                          const float z = (plane.C > 0) ? chunkBoundsMax.z : chunkBoundsMin.z;
-                          if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0) {
-                              isInsideFrustum = false;
-                              break;
-                          }
-                      }
-                      if (!isInsideFrustum) return;
-
-                      Vector chunkCenter = chunk.atPosition + Vector(halfChunk, halfChunk, halfChunk);
-                      Vector distVector = chunkCenter - sceneCamera->Position;
-                      distVector.y = 0;
-
-                      //Distance from chunk center to player
-                      float distance = distVector.Magnitude();
-                      auto LOD = 0; //chunk.didUserEditChunk ? 0 : GetLevelOfDetailFromDistance(distance);
-
-                      std::vector<LODDBLock> chunkLocalBlocks;
-                      chunkLocalBlocks.reserve(ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ); //preallocate for 1 chunk, this is only once per thread so shouldnt be that bad
-
-                      //check if LOD is cached for chunk
-                      if (chunk.cache.cachedLOD == LOD && chunk.cache.isValidCache) {
-                          // totalVertexNumber.fetch_add(3 * 8); //3 verticies for 8 faces
-                          chunkLODBlocks[idx] = chunk.cache.lodBlocks;
-                          totalVertexNumber.fetch_add(chunk.cache.lodBlocks.size() * 3 * 12);
-                          return;
-                      }
-
-                      int LODBlockSize = std::min(static_cast<int>(std::pow(ChunkManager::smallestChunkSizeLogNumber, LOD)), ChunkManager::chunkSizeXYZ);
-                      const int maxBlockCountInLOD = LODBlockSize * LODBlockSize * LODBlockSize;
-                      const int cellsPerAxis = ChunkManager::chunkSizeXYZ / LODBlockSize;
-
-
-                      //Ignore empty chunks (f.e sky or ungenerated underground)
-                      if (chunk.isEmpty()) return;
-
-                      //Index of a 3D list as integer
-                      auto index3D = [](int cx, int cy, int cz) {
-                          return (cy * ChunkManager::chunkSizeXYZ + cz) * ChunkManager::chunkSizeXYZ + cx;
-                      };
-
-                      //Prefill a 3D grid for faster access within the chunk
-                      std::array<bool, ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ> blockPresence{};
-
-                      //Rebuild block presence only when chunk cache is invalid
-                      if (chunk.cache.isValidCache) {
-                          for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
-                              for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += 1) {
-                                  for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
-                                      const auto blockAt = chunk.tryGet(Vector(x, y, z));
-
-                                      if (blockAt != nullptr && blockAt->has_value())
-                                          blockPresence[index3D(x, y, z)] = true;
-                                      else
-                                          blockPresence[index3D(x, y, z)] = false;
-                                  }
-                              }
-                          }
-                      } else {
-                          blockPresence = chunk.cache.cachedBlockPresence;
-                      }
-
-                      for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += LODBlockSize) {
-                          for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += LODBlockSize) {
-                              for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += LODBlockSize) {
-                                  //Precautions just in case LODBlockSize is not a logarythm of chunkSizeXYZ
-                                  int currentLODX = std::min(LODBlockSize, ChunkManager::chunkSizeXYZ - x);
-                                  int currentLODY = std::min(LODBlockSize, ChunkManager::chunkSizeXYZ - y);
-                                  int currentLODZ = std::min(LODBlockSize, ChunkManager::chunkSizeXYZ - z);
-
-                                  if (chunkFaceCulling) {
-                                      if (x != 0) {
-                                          const auto blockAt = chunk.tryGet(Vector(x - 1, y, z));
-                                          if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[index3D(x - 1, y, z)] = true;
-                                      }
-
-                                      if (x != ChunkManager::chunkSizeXYZ - 1) {
-                                          const auto blockAt = chunk.tryGet(Vector(x + 1, y, z));
-                                          if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[index3D(x + 1, y, z)] = true;
-                                      }
-
-                                      if (y != 0) {
-                                          const auto blockAt = chunk.tryGet(Vector(x, y - 1, z));
-                                          if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[index3D(x, y - 1, z)] = true;
-                                      }
-
-                                      if (y != ChunkManager::chunkSizeXYZ - 1) {
-                                          const auto blockAt = chunk.tryGet(Vector(x, y + 1, z));
-                                          if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[index3D(x, y + 1, z)] = true;
-                                      }
-                                      if (x != 0) {
-                                          const auto blockAt = chunk.tryGet(Vector(x, y, z - 1));
-                                          if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[index3D(x, y, z - 1)] = true;
-                                      }
-
-                                      if (x != ChunkManager::chunkSizeXYZ - 1) {
-                                          const auto blockAt = chunk.tryGet(Vector(x, y, z + 1));
-                                          if (blockAt != nullptr && blockAt->has_value())
-                                              blockPresence[index3D(x, y, z + 1)] = true;
-                                      }
-                                  }
-
-                                  int blockCount = 0;
-                                  for (int yObj = 0; yObj < currentLODY; yObj++) {
-                                      for (int xObj = 0; xObj < currentLODX; xObj++) {
-                                          for (int zObj = 0; zObj < currentLODZ; zObj++) {
-                                              if (blockPresence[index3D(x + xObj, y + yObj, z + zObj)]) {
-                                                  blockCount++;
-                                              }
-                                          }
-                                      }
-                                  }
-
-                                  if (blockCount > 0 && (static_cast<float>(blockCount) / static_cast<float>(maxBlockCountInLOD)) > 0.5f) {
-                                      Vector LODBlockBoundMin = chunk.atPosition + Vector(x, y, z);
-                                      Vector LODBlockBoundMax = LODBlockBoundMin + Vector(currentLODX, currentLODY, currentLODZ);
-
-                                      bool isBlockVisible = true;
-                                      for (const auto &plane: sceneCamera->frustrumPlanes) {
-                                          const float x = (plane.A > 0) ? LODBlockBoundMax.x : LODBlockBoundMin.x;
-                                          const float y = (plane.B > 0) ? LODBlockBoundMax.y : LODBlockBoundMin.y;
-                                          const float z = (plane.C > 0) ? LODBlockBoundMax.z : LODBlockBoundMin.z;
-                                          if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0) {
-                                              isBlockVisible = false;
-                                              break;
-                                          }
-                                      }
-
-                                      if (!isBlockVisible) continue;
-
-                                      const float minX = static_cast<float>(x) - kBlockHalfExtent;
-                                      const float minY = static_cast<float>(y) - kBlockHalfExtent;
-                                      const float minZ = static_cast<float>(z) - kBlockHalfExtent;
-                                      const float maxX = static_cast<float>(x + currentLODX) - kBlockHalfExtent;
-                                      const float maxY = static_cast<float>(y + currentLODY) - kBlockHalfExtent;
-                                      const float maxZ = static_cast<float>(z + currentLODZ) - kBlockHalfExtent;
-
-                                      Vector v1 = Vector(minX, minY, minZ);
-                                      Vector v2 = Vector(minX, minY, maxZ);
-                                      Vector v3 = Vector(maxX, minY, maxZ);
-                                      Vector v4 = Vector(maxX, minY, minZ);
-                                      Vector v5 = Vector(minX, maxY, minZ);
-                                      Vector v6 = Vector(minX, maxY, maxZ);
-                                      Vector v7 = Vector(maxX, maxY, maxZ);
-                                      Vector v8 = Vector(maxX, maxY, minZ);
-
-                                      std::array<Face, 12> blockFaces = {
-                                          {
-                                              {v5, v6, v7}, {v5, v7, v8}, // top, +Y
-                                              {v1, v3, v2}, {v1, v4, v3}, // bottom, -Y
-                                              {v4, v8, v7}, {v4, v7, v3}, // right, +X
-                                              {v1, v2, v6}, {v1, v6, v5}, // left, -X
-                                              {v2, v3, v7}, {v2, v7, v6}, // front, +Z
-                                              {v1, v5, v8}, {v1, v8, v4} // back, -Z
-                                          }
-                                      };
-
-                                      for (auto &blockFace: blockFaces) {
-                                          blockFace += chunk.atPosition;
-                                      }
-
-                                      chunkLocalBlocks.emplace_back(blockFaces);
-
-                                      totalVertexNumber.fetch_add(3 * 12); //3 verticies for 12 faces
-                                  }
-                              }
-                          }
-                      }
-
-                      //Only populate cached chunk block presence if chunk was previously invalid
-                      if (!chunk.cache.isValidCache) {
-                          chunk.cache.cachedBlockPresence = std::move(blockPresence);
-                          chunk.cache.isValidCache = true;
-                      }
-
-                      chunk.cache.lodBlocks = std::move(chunkLocalBlocks); //lod blocks have global lifetime so they should have blocks moved into cache
-                      chunkLODBlocks[idx] = chunk.cache.lodBlocks;
-
-                      chunk.cache.cachedLOD = LOD;
-                  }
-    );
-
-    SLog1("Frustrum culling took: %llu ms...", (SDL_GetTicks()-startTicks));
-
-    startTicks = SDL_GetTicks();
-
-    SLog1("Greedy meshing took: %llu ms...", (SDL_GetTicks() - startTicks));;
-
-    if (deltaTimeMS == 0) {
-        SLog1("FPS: 0 (0DMS)");
-    } else {
-        SLog1("FPS: %llu", 1000 / deltaTimeMS);
+        frameProfiler.AddCount(FrameProfiler::Counter::BytesUploaded, bytesToUpload);
     }
 
-    const size_t lineStartVertex = totalVertexNumber.load();
-    const size_t totalUploadedVertexNumber = totalVertexNumber.load() + totalLineVertexNumber.load();
-
-    SLog1("Num of verticies total: %zi", lineStartVertex);
-
-    if (totalUploadedVertexNumber > 0) {
-        if (deltaTimeMS != 0) {
-            totalFPS += static_cast<int>(1000 / deltaTimeMS);
-            numFPS += 1;
-        }
-
-        std::vector<Vertex3D> verticies(totalUploadedVertexNumber);
-
-        const Uint32 vertexDataSize = totalUploadedVertexNumber * sizeof(Vertex3D);
-
-        std::vector<Face> nonFrustrumCulledFaces{};
-
-        //Combine vector of vectors of faces into one vector
-        size_t totalFaces = 0;
-        for (const auto &vec: chunkLODBlocks) {
-            totalFaces += vec.size() * 12; // each LODDBlock has 12 faces
-        }
-        nonFrustrumCulledFaces.reserve(totalFaces);
-
-        for (const auto &vec: chunkLODBlocks) {
-            for (const auto &block: vec) {
-                nonFrustrumCulledFaces.insert(
-                    nonFrustrumCulledFaces.end(),
-                    block.faces.begin(),
-                    block.faces.end()
-                );
-            }
-        }
-
-        std::atomic<size_t> cpyIndex{0};
-
-        std::for_each(std::execution::par_unseq, std::begin(nonFrustrumCulledFaces), std::end(nonFrustrumCulledFaces), [&](Face &face) {
-            auto drawcallVerts = face.GetFaceDrawCallVerticies();
-            auto start = cpyIndex.fetch_add(3);
-            memcpy(verticies.data() + start, drawcallVerts.data(), 3 * sizeof(Vertex3D));
-        });
-
-        if (sceneVertexBuffer == nullptr) {
-            SDL_GPUBufferCreateInfo bufferInfo{};
-            bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-            bufferInfo.size = vertexDataSize;
-            bufferInfo.props = 0;
-            sceneVertexBuffer = SDL_CreateGPUBuffer(m_gpuDevice.get(), &bufferInfo);
-            lastSceneVertexBufferDataSize = vertexDataSize;
-            if (!sceneVertexBuffer) {
-                SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create scene vertex buffer: %s", SDL_GetError());
-                SDL_SubmitGPUCommandBuffer(commandBuffer);
-                return FAILURE;
-            }
-        } else {
-            if (canCreateVertexBufferEveryFrame) {
-                if (lastSceneVertexBufferDataSize != vertexDataSize) {
-                    // SDL_WaitForGPUIdle(m_gpuDevice.get());
-                    if (sceneVertexBuffer) SDL_ReleaseGPUBuffer(m_gpuDevice.get(), sceneVertexBuffer);
-                    SDL_GPUBufferCreateInfo bufferInfo{};
-                    bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-                    bufferInfo.size = vertexDataSize;
-                    bufferInfo.props = 0;
-
-                    SDL_WaitForGPUIdle(m_gpuDevice.get());
-                    sceneVertexBuffer = SDL_CreateGPUBuffer(m_gpuDevice.get(), &bufferInfo);
-                    lastSceneVertexBufferDataSize = vertexDataSize;
-                    if (!sceneVertexBuffer) {
-                        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create scene vertex buffer: %s", SDL_GetError());
-                        SDL_SubmitGPUCommandBuffer(commandBuffer);
-                        return FAILURE;
-                    }
-                }
-            }
-        }
-
-        SDL_GPUTransferBufferCreateInfo transferInfo{};
-        transferInfo.size = vertexDataSize;
-        transferInfo.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        SDL_GPUTransferBuffer *frameTransferBuffer = SDL_CreateGPUTransferBuffer(m_gpuDevice.get(), &transferInfo);
-        if (!frameTransferBuffer) {
-            SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create scene's vertex transfer buffer: %s", SDL_GetError());
-            SDL_SubmitGPUCommandBuffer(commandBuffer);
-            return FAILURE;
-        }
-
-        auto *mappedData = static_cast<Vertex3D *>(SDL_MapGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer, true));
-        if (!mappedData) {
-            SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to map transfer buffer: %s", SDL_GetError());
-            SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer);
-            SDL_SubmitGPUCommandBuffer(commandBuffer);
-            return FAILURE;
-        }
-
-        SDL_memcpy(mappedData, verticies.data(), vertexDataSize);
-        SDL_UnmapGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer);
-
-        SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
-        if (!copyPass) {
-            SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to begin copy pass");
-            SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer);
-            SDL_SubmitGPUCommandBuffer(commandBuffer);
-            return FAILURE;
-        }
-
-        SDL_GPUTransferBufferLocation src = {frameTransferBuffer, 0};
-        SDL_GPUBufferRegion dst = {sceneVertexBuffer, 0, vertexDataSize};
-        SDL_UploadToGPUBuffer(copyPass, &src, &dst, true);
-        SDL_EndGPUCopyPass(copyPass);
-        SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), frameTransferBuffer);
-    }
-
+    stageScope.emplace(frameProfiler, FrameProfiler::Stage::Acquire);
     //Acquire the swapchain texture for rendering
     SDL_GPUTexture *swapchainTexture;
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)) {
@@ -1694,6 +1376,8 @@ SDL_AppResult App::OnRender() {
         SDL_SubmitGPUCommandBuffer(commandBuffer);
         return FAILURE;
     }
+
+    stageScope.emplace(frameProfiler, FrameProfiler::Stage::Record);
 
     //Set up the colour target info for the render pass
     SDL_GPUColorTargetInfo colorTargetInfo = {};
@@ -1721,34 +1405,38 @@ SDL_AppResult App::OnRender() {
     SDL_GPUViewport viewport = {0, 0, (float) defaultScreenWidth, (float) defaultScreenHeight, 0.0f, 1.0f};
     SDL_SetGPUViewport(renderPass, &viewport);
 
-    if (totalUploadedVertexNumber > 0 && sceneVertexBuffer != nullptr) {
-        SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
+    SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
 
-        SDL_PushGPUVertexUniformData(
-            commandBuffer,
-            0,
-            float16Array,
-            sizeof(float16Array)
-        );
+    SDL_GPUTextureSamplerBinding bindings[2] =
+    {
+        {colourTexture, colourSampler},
+        {normalTexture, normalSampler},
+    };
+    SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 2);
 
-        //Bind our vertex buffer/s
-        SDL_GPUBufferBinding vertexBinding = {sceneVertexBuffer, 0};
+    Uint64 verticesDrawn = 0;
+    Uint64 chunksDrawn = 0;
+    for (const auto &[chunkLookup, mesh]: chunkMeshStore->Meshes()) {
+        if (mesh.vertexCount == 0 || !IsChunkInFrustum(*sceneCamera, chunkLookup)) continue;
+
+        uniforms.chunkOffset[0] = static_cast<float>(chunkLookup.a);
+        uniforms.chunkOffset[1] = static_cast<float>(chunkLookup.b);
+        uniforms.chunkOffset[2] = static_cast<float>(chunkLookup.c);
+        SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+
+        const SDL_GPUBufferBinding vertexBinding = {mesh.buffer, 0};
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+        SDL_DrawGPUPrimitives(renderPass, mesh.vertexCount, 1, 0, 0);
 
-        SDL_GPUTextureSamplerBinding bindings[2] =
-        {
-            {colourTexture, colourSampler},
-            {normalTexture, normalSampler},
-        };
-
-        SDL_BindGPUFragmentSamplers(renderPass, 0, bindings, 2);
-        SDL_DrawGPUPrimitives(renderPass, totalVertexNumber, 1, 0, 0);
-        SDL_BindGPUGraphicsPipeline(renderPass, lineGraphicsPipeline);
-        SDL_DrawGPUPrimitives(renderPass, totalLineVertexNumber, 1, lineStartVertex, 0);
+        verticesDrawn += mesh.vertexCount;
+        chunksDrawn += 1;
     }
+    frameProfiler.AddCount(FrameProfiler::Counter::VerticesDrawn, verticesDrawn);
+    frameProfiler.AddCount(FrameProfiler::Counter::ChunksDrawn, chunksDrawn);
 
     SDL_EndGPURenderPass(renderPass);
 
+    stageScope.emplace(frameProfiler, FrameProfiler::Stage::Submit);
     if (!SDL_SubmitGPUCommandBuffer(commandBuffer)) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to submit command buffer: %s", SDL_GetError());
         return FAILURE;
