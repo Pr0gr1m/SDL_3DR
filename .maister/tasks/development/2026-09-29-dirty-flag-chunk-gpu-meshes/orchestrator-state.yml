@@ -1,0 +1,101 @@
+orchestrator:
+  started_phase: phase-14
+  completed_phases: [phase-1, phase-2, phase-3, phase-4, phase-5, phase-6, phase-7, phase-8, phase-9, phase-10, phase-11, phase-12, phase-13, phase-14]
+  failed_phases: []
+  auto_fix_attempts: {}
+  options:
+    sequential: null
+    html_output: true
+    mockup_format: html
+    spec_audit_enabled: true
+    skip_test_suite: true
+    e2e_enabled: false
+    user_docs_enabled: false
+    code_review_enabled: true
+    pragmatic_review_enabled: true
+    reality_check_enabled: false
+    production_check_enabled: false
+  created: 2026-09-29T17:54:01Z
+  updated: 2026-09-29T19:22:02Z
+  task_path: .maister/tasks/development/2026-09-29-dirty-flag-chunk-gpu-meshes
+  task_ids: {}
+task:
+  title: Dirty-flag per-chunk GPU meshes
+  description: "Implement the researched design: measurement (in-app timers), dirty-flag chunk mesh replacing Face cache, per-chunk persistent GPU buffers, neighbor-aware cross-chunk culling (research: .maister/tasks/research/2026-09-29-performance-gaps-caching)"
+  status: completed
+  tags: []
+  priority: null
+task_context:
+  risk_level: medium
+  clarifications_resolved: true
+  scope_expanded: false
+  architecture_decision: "Manager-based monolith with dirty-flag per-chunk GPU meshes (ADR-001..005 from research)"
+  task_characteristics:
+    has_reproducible_defect: false
+    modifies_existing_code: true
+    creates_new_entities: true
+    involves_data_operations: false
+    ui_heavy: false
+  research_reference:
+    path: .maister/tasks/research/2026-09-29-performance-gaps-caching
+    research_question: "What performance gaps exist in SDL_3DR, especially related to caching?"
+    research_type: technical
+    confidence_level: medium
+  project_doc_paths:
+    - .maister/docs/project/vision.md
+    - .maister/docs/project/roadmap.md
+    - .maister/docs/project/tech-stack.md
+    - .maister/docs/project/architecture.md
+  phase_summaries:
+    research:
+      summary: "Cache is broken and CPU-only; full scene re-flattened and re-uploaded each frame. Chosen: in-app timers, dirty-flag mesh, per-chunk GPU buffers, neighbor-aware culling, keep optional<Object>."
+      key_findings: [inverted isValidCache branch App.cpp:1418, never invalidated, frustum-dependent cache, full re-upload every frame]
+      recommended_approach: "Stages: measure -> dirty flag -> per-chunk GPU buffers -> neighbor culling"
+      decisions: []
+      risks: []
+      artifacts: []
+    codebase_analysis:
+      summary: "OnRender (App.cpp:1311-1758) rebuilds all meshes per frame; E-key removal is the only runtime mutation; Chunk is copied/moved so GPU handles must live outside Chunk; SDL defers buffer release."
+      key_files: [src/App.cpp, src/App.h, src/core/Chunk.h, src/core/ChunkCache.h, src/core/ChunkManager.h, src/shaders/vertex.glsl]
+      artifacts:
+        - {path: analysis/codebase-analysis.md, label: Codebase analysis, html: null}
+    clarifications:
+      summary: "Fix worldgen z bug; missing neighbor = solid; key-toggle benchmark path; SDL_Log profiler; no tests; UVs from world position (assumed)."
+      artifacts:
+        - {path: analysis/clarifications.md, label: Clarifications, html: null}
+    gap_analysis:
+      summary: "Gaps: no profiler/benchmark, no per-chunk GPU store, no neighbor accessor, no chunk offset in shader, no meshDirty; cache and chunkFaceCulling deleted; worldgen z bug fixed. Risk medium, effort high."
+      integration_points: [App::OnRender, E-key edit, ChunkManager, vertex.glsl + vertex.spv, worldgen]
+      artifacts:
+        - {path: analysis/gap-analysis.md, label: Gap analysis, html: null}
+    scope_clarifications:
+      scope_expanded: false
+      summary: "Solid X/Z + air Y boundary; setBlock/removeBlock dirty API; lazy chunk create kept; exclusive PositionInBounds; single-threaded remesh."
+      artifacts:
+        - {path: analysis/scope-clarifications.md, label: Scope clarifications, html: null}
+    specification:
+      summary: "Per-chunk meshDirty meshes with ChunkMesher, ChunkMeshStore, FrameProfiler; 18 requirements, 5 stages; extra: non-const tryGet/operator[] deleted, setBlock/removeBlock on ChunkManager."
+      artifacts:
+        - {path: implementation/spec.md, label: Specification, html: implementation/spec.html}
+        - {path: analysis/requirements.md, label: Requirements, html: null}
+    spec_audit:
+      summary: "Pass with concerns: 0 critical, 1 high (baseline depends on uninitialised presence array), 3 medium, 5 low."
+      artifacts:
+        - {path: verification/spec-audit.md, label: Spec audit, html: null}
+    implementation_plan:
+      summary: "5 sequential task groups, 41 steps; verification by build + manual/log checks; audit concerns folded in."
+      artifacts:
+        - {path: implementation/implementation-plan.md, label: Implementation plan, html: implementation/implementation-plan.html}
+    implementation:
+      summary: "All 5 groups coded; clean Debug build with no warnings. NO runtime verification: app blocked by Windows application control, so baseline, run checks, benchmark, growth test are NOT RUN (pending user)."
+      risks:
+        - "No runtime verification of any group; baseline (1.9/1.10) not captured"
+        - "setBlock has no runtime caller and was only desk-checked"
+      artifacts:
+        - {path: implementation/work-log.md, label: Work log, html: null}
+verification_context:
+  last_status: passed_with_issues
+  issues_found: [runtime verification pending, mesher builds all faces before culling, reserve oversize, Uint32/bit_ceil overflow guard, profiler report skews next frame, setBlock no caller, commented-out code, stale project docs]
+  fixes_applied: [mesher neighbor-first face build, reserve removed + dead members deleted, size_t and 2^31 guards in ChunkMeshStore, profiler report timing, swapchain result check + null guards, commented-out code and uniformBuffer removed, architecture.md and roadmap.md updated]
+  decisions_made: []
+  reverify_count: 1

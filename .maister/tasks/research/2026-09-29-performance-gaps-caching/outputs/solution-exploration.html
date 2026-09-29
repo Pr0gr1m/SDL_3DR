@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solution Exploration — performance gaps and caching</title>
+<style>
+:root {
+  --bg:#f6f7f9; --surface:#fff; --border:#e2e5ea; --text:#1a1d23; --dim:#6b7280;
+  --accent:#4f46e5; --accent-soft:#eef2ff; --ok:#16a34a; --ok-soft:#ecfdf3;
+  --warn:#d97706; --warn-soft:#fffbeb; --crit:#dc2626; --crit-soft:#fef2f2;
+  --info:#2563eb; --info-soft:#eff6ff; --radius:10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111418; --surface:#1a1f26; --border:#2e3640; --text:#e6e9ee; --dim:#9aa4b2;
+    --accent:#818cf8; --accent-soft:#26294a; --ok:#4ade80; --ok-soft:#11291a;
+    --warn:#fbbf24; --warn-soft:#2e2410; --crit:#f87171; --crit-soft:#321616;
+    --info:#60a5fa; --info-soft:#15233a; }
+}
+* { box-sizing:border-box; }
+body { margin:0 auto; max-width:1100px; padding:24px 20px 64px; background:var(--bg);
+  color:var(--text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+h1 { font-size:22px; letter-spacing:-.01em; } h2 { font-size:16px; margin-top:28px; }
+h3 { font-size:14px; margin:18px 0 6px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; margin:14px 0; }
+.badge { display:inline-block; font-size:11px; font-weight:600; text-transform:uppercase;
+  letter-spacing:.04em; padding:2px 8px; border-radius:99px; background:var(--accent-soft); color:var(--accent); }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+th { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px;
+  background:var(--accent-soft); padding:1px 5px; border-radius:4px; }
+details > summary { cursor:pointer; font-weight:600; }
+.crumbs { display:flex; gap:14px; font-size:13px; margin-bottom:18px; flex-wrap:wrap; }
+.crumbs a.md { margin-left:auto; color:var(--dim); }
+.crumbs .here { font-weight:650; color:var(--text); }
+.tiles { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
+.tile { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:10px 16px; text-align:center; min-width:90px; }
+.tile b { display:block; font-size:20px; letter-spacing:-.01em; }
+.tile span { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
+.cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+.cards .card { margin:0; }
+.cards .rec { border:2px solid var(--accent); background:var(--accent-soft); }
+.cards h4 { margin:0 0 6px; font-size:13.5px; }
+.cards p { margin:4px 0; font-size:13px; }
+.tldr { background:var(--surface); border:1px solid var(--border); border-left:4px solid var(--accent);
+  border-radius:var(--radius); padding:6px 18px 12px; }
+.H { color:var(--ok); font-weight:700; } .M { color:var(--warn); font-weight:700; } .L { color:var(--crit); font-weight:700; }
+tr.rec td { background:var(--accent-soft); }
+</style>
+</head>
+<body>
+<nav class="crumbs">
+  <a href="../dashboard.html">&larr; Dashboard</a>
+  <a href="research-report.html">Report</a>
+  <span class="here">Exploration</span>
+  <a href="high-level-design.html">Design</a>
+  <a href="decision-log.html">Decision Log</a>
+  <a href="solution-exploration.md" target="_blank" rel="noopener" class="md">md twin &#8599;</a>
+</nav>
+<header>
+  <h1>Solution Exploration: Performance Gaps and Caching in SDL_3DR</h1>
+  <span class="badge">solution exploration</span> <span style="color:var(--dim)">generated 2026-09-29</span>
+</header>
+<div class="tiles">
+  <div class="tile"><b>5</b><span>decision areas</span></div>
+  <div class="tile"><b>20</b><span>alternatives</span></div>
+  <div class="tile"><b>5</b><span>recommended</span></div>
+  <div class="tile"><b>Medium</b><span>confidence</span></div>
+</div>
+
+<section class="tldr">
+  <h2>TL;DR</h2>
+  <ul>
+    <li>Five decision areas, 4 alternatives each: measurement, CPU cache, GPU mesh ownership, hidden-face/meshing, chunk data layout.</li>
+    <li>Recommended: Release + frame-time stats; replace the CPU Face cache with dirty-flag meshes; per-chunk persistent GPU buffers; neighbor-aware face culling; keep data layout for now.</li>
+    <li>Order: measure &rarr; invalidation/mesh ownership &rarr; per-chunk GPU buffers &rarr; neighbor culling &rarr; layout only if measured.</li>
+    <li>Confidence medium: static research only, nothing profiled.</li>
+  </ul>
+  <h2>Key Decisions</h2>
+  <ul>
+    <li><b>Area 1:</b> Release build + in-app per-stage timers (roadmap item; a learning goal in itself).</li>
+    <li><b>Area 2:</b> Remove the CPU Face cache; use a per-chunk dirty flag (cache is in the wrong layer, F1-F3, F5).</li>
+    <li><b>Area 3:</b> Per-chunk persistent GPU vertex buffers, rebuilt only when dirty.</li>
+    <li><b>Area 4:</b> Neighbor-aware cross-chunk culling; defer greedy meshing and indexing.</li>
+    <li><b>Area 5:</b> Keep <code>std::optional&lt;Object&gt;</code> until memory or gen time is measured to matter.</li>
+  </ul>
+  <h2>Open Questions / Risks</h2>
+  <ul>
+    <li>All magnitudes unmeasured; if Release is GPU-bound or fast, Areas 3-5 lose urgency (Area 1 gates them).</li>
+    <li>Cross-chunk culling needs neighbor dirtying on edit and a policy for unloaded neighbors (air vs solid).</li>
+    <li>Thread safety of E-key edits vs parallel render is unverified.</li>
+    <li>Toolchain mismatch (MinGW logs vs MSVC-triplet vcpkg) may mean the real build differs from the analyzed one.</li>
+  </ul>
+</section>
+<p>Contents: <a href="#a1">1 Measurement</a> &middot; <a href="#a2">2 CPU cache</a> &middot; <a href="#a3">3 GPU ownership</a> &middot; <a href="#a4">4 Meshing</a> &middot; <a href="#a5">5 Data layout</a> &middot; <a href="#tradeoff">Trade-offs</a> &middot; <a href="#rec">Recommendation</a> &middot; <a href="#deferred">Deferred</a></p>
+
+<main>
+<h2>Problem Reframing</h2>
+<div class="card">
+  <p>The only cache (<code>Chunk::cache</code>) is inverted (App.cpp:1418), never invalidated (1550) and stores a camera-dependent frustum-culled subset; on a hit the frame still copies, flattens, regenerates vertices and re-uploads everything (1396, 1587-1681). Face culling is off (<code>chunkFaceCulling=false</code>) and no optimization flags exist. Scope: HOW to close these gaps, not new features.</p>
+  <p><b>HMW:</b> (1) get trustworthy numbers; (2) make "unchanged chunk means no work" correct; (3) stop re-uploading the whole scene; (4) stop generating never-visible faces; (5) keep per-block cost proportional to need.</p>
+  <p style="color:var(--dim)">Ratings below: H good, M medium, L weak on each axis (Risk H = low risk).</p>
+</div>
+
+<h2 id="a1">Decision Area 1: Measurement and Build Configuration</h2>
+<div class="cards">
+  <div class="card"><h4>1A Release + existing timers</h4><p>Quick Debug-vs-Release check with <code>SLog1</code>.</p><p><b>+</b> Minutes of work. <b>&minus;</b> Integer FPS, noisy, no GPU time.</p></div>
+  <div class="card rec"><h4>1B In-app frame-time instrumentation (recommended)</h4><p>Release preset + scope timers, ring buffer, avg/p95/max, fixed benchmark path.</p><p><b>+</b> Roadmap item, repeatable, teaches stats. <b>&minus;</b> No GPU time.</p></div>
+  <div class="card"><h4>1C External profiler (Tracy, RenderDoc, Nsight)</h4><p>Full CPU/GPU timelines.</p><p><b>+</b> Deepest visibility. <b>&minus;</b> New dependency, overkill at 2 draws.</p></div>
+  <div class="card"><h4>1D Skip measurement</h4><p>Fix by code reading.</p><p><b>+</b> Fastest. <b>&minus;</b> Debug distortion; stale cache skews baseline.</p></div>
+</div>
+<p><b>Recommend 1B</b> (1A as first step), escalate to 1C for GPU questions. Confidence high.</p>
+
+<h2 id="a2">Decision Area 2: CPU Chunk Cache</h2>
+<div class="cards">
+  <div class="card"><h4>2A In-place fix</h4><p>Fix branch, init bitmap, cache all faces, invalidate on edit, return reference, move <code>reserve</code>.</p><p><b>+</b> Small diff. <b>&minus;</b> Still wrong layer; pipeline still runs each frame.</p></div>
+  <div class="card rec"><h4>2B Dirty-flag chunk mesh (recommended)</h4><p>Drop the Face cache; <code>meshDirty</code> set on edit and boundary neighbors; chunk-level frustum test only.</p><p><b>+</b> Removes stale/camera bugs by construction. <b>&minus;</b> Full payoff needs Area 3.</p></div>
+  <div class="card"><h4>2C Remove caching</h4><p>Regenerate each frame, optimize the path.</p><p><b>+</b> Simplest. <b>&minus;</b> Cost scales, drops caching theme. Fallback if Release is fast.</p></div>
+  <div class="card"><h4>2D Versioned multi-LOD cache</h4><p>Version counters + LOD slots.</p><p><b>+</b> Robust, LOD-ready. <b>&minus;</b> Speculative; LOD is hard-coded 0.</p></div>
+</div>
+<p><b>Recommend 2B</b>, staged: 2A's correctness subset as a stopgap if Area 3 is delayed. Confidence medium-high.</p>
+
+<h2 id="a3">Decision Area 3: GPU-Side Mesh Ownership</h2>
+<div class="cards">
+  <div class="card"><h4>3A Shared buffer, upload only when dirty</h4><p>Persistent transfer buffer, growth policy.</p><p><b>+</b> Minimal change. <b>&minus;</b> Camera motion changes visible set; any edit re-uploads all.</p></div>
+  <div class="card rec"><h4>3B Per-chunk persistent GPU buffers (recommended)</h4><p>Each chunk owns an <code>SDL_GPUBuffer</code>; rebuild only when dirty; draw per visible chunk.</p><p><b>+</b> Zero work for static chunks; edits touch one chunk. <b>&minus;</b> N draws; buffer lifetime bookkeeping.</p></div>
+  <div class="card"><h4>3C Per-chunk + indirect/multi-draw</h4><p>Batched indirect draws, optional GPU culling.</p><p><b>+</b> Scales. <b>&minus;</b> Complex; no evidence draw calls bottleneck.</p></div>
+  <div class="card"><h4>3D Merged buffer + sub-allocator</h4><p>Regions, dirty-region copies.</p><p><b>+</b> Few binds, partial updates. <b>&minus;</b> Allocator/fragmentation for 4 chunks.</p></div>
+</div>
+<p><b>Recommend 3B.</b> Size per-chunk buffers from real vertex counts with a regrow policy (guards F9 overflow). Confidence medium-high on direction, low on magnitude.</p>
+
+<h2 id="a4">Decision Area 4: Hidden-Face Culling and Meshing</h2>
+<div class="cards">
+  <div class="card"><h4>4A Fix and enable in-chunk culling</h4><p>Fix z-guard typos (1467, 1473), enable flag.</p><p><b>+</b> Tiny change. <b>&minus;</b> Border faces stay.</p></div>
+  <div class="card rec"><h4>4B Neighbor-aware cross-chunk culling (recommended)</h4><p>Emit a face only if neighbor is air, via <code>chunkMap</code> for borders; chunk-local vertices; dirty neighbors on edit.</p><p><b>+</b> Removes all hidden faces. <b>&minus;</b> Cross-chunk coupling.</p></div>
+  <div class="card"><h4>4C Greedy meshing</h4><p>Merge coplanar quads.</p><p><b>+</b> Fewest triangles. <b>&minus;</b> Needs tiling/atlas; shallow terrain limits merging.</p></div>
+  <div class="card"><h4>4D Indexed/compact vertices</h4><p>4 verts + 6 indices per face, packed attributes.</p><p><b>+</b> Less bandwidth. <b>&minus;</b> Shader changes; largely obviated by Area 3.</p></div>
+</div>
+<p><b>Recommend 4B</b> (4A is its first half). Assumes air outside the loaded world. Confidence medium.</p>
+
+<h2 id="a5">Decision Area 5: Chunk Data Layout</h2>
+<div class="cards">
+  <div class="card rec"><h4>5A Keep <code>optional&lt;Object&gt;</code> (recommended now)</h4><p>Optionally add cached <code>isEmpty</code>.</p><p><b>+</b> Zero risk. <b>&minus;</b> ~160 KiB/chunk, poor locality.</p></div>
+  <div class="card"><h4>5B Compact block ids + registry</h4><p>uint8/16 ids, properties by lookup.</p><p><b>+</b> ~100x smaller, faster neighbor checks. <b>&minus;</b> Broad refactor. Adopt when triggered.</p></div>
+  <div class="card"><h4>5C Hybrid ids + sparse state table</h4><p><b>+</b> Flexible. <b>&minus;</b> Two representations, no need yet.</p></div>
+  <div class="card"><h4>5D RLE / octree</h4><p><b>+</b> Tiny memory. <b>&minus;</b> Complex random access; overkill.</p></div>
+</div>
+<p><b>Recommend 5A now, 5B when triggered</b> (measured memory or gen time, neighbor lookups in profile, or streaming). Confidence medium.</p>
+
+<h2 id="tradeoff">Trade-Off Analysis</h2>
+<div class="card">
+<table>
+<tr><th>Alternative</th><th>Feasibility</th><th>User impact</th><th>Simplicity</th><th>Risk</th><th>Scalability</th></tr>
+<tr><td>1A</td><td class="H">H</td><td class="L">L</td><td class="H">H</td><td class="H">H</td><td class="L">L</td></tr>
+<tr class="rec"><td>1B</td><td class="H">H</td><td class="M">M</td><td class="H">H</td><td class="H">H</td><td class="M">M</td></tr>
+<tr><td>1C</td><td class="M">M</td><td class="M">M</td><td class="L">L</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>1D</td><td class="H">H</td><td class="L">L</td><td class="H">H</td><td class="L">L</td><td class="L">L</td></tr>
+<tr><td>2A</td><td class="H">H</td><td class="M">M</td><td class="H">H</td><td class="H">H</td><td class="L">L</td></tr>
+<tr class="rec"><td>2B</td><td class="M">M</td><td class="H">H</td><td class="H">H</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>2C</td><td class="H">H</td><td class="L">L</td><td class="H">H</td><td class="H">H</td><td class="L">L</td></tr>
+<tr><td>2D</td><td class="M">M</td><td class="L">L</td><td class="L">L</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>3A</td><td class="H">H</td><td class="M">M</td><td class="H">H</td><td class="H">H</td><td class="L">L</td></tr>
+<tr class="rec"><td>3B</td><td class="M">M</td><td class="H">H</td><td class="M">M</td><td class="M">M</td><td class="M">M</td></tr>
+<tr><td>3C</td><td class="L">L</td><td class="M">M</td><td class="L">L</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>3D</td><td class="L">L</td><td class="M">M</td><td class="L">L</td><td class="L">L</td><td class="H">H</td></tr>
+<tr><td>4A</td><td class="H">H</td><td class="M">M</td><td class="H">H</td><td class="H">H</td><td class="M">M</td></tr>
+<tr class="rec"><td>4B</td><td class="M">M</td><td class="H">H</td><td class="M">M</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>4C</td><td class="L">L</td><td class="M">M</td><td class="L">L</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>4D</td><td class="M">M</td><td class="M">M</td><td class="M">M</td><td class="M">M</td><td class="M">M</td></tr>
+<tr class="rec"><td>5A</td><td class="H">H</td><td class="L">L</td><td class="H">H</td><td class="H">H</td><td class="L">L</td></tr>
+<tr><td>5B</td><td class="M">M</td><td class="M">M</td><td class="M">M</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>5C</td><td class="L">L</td><td class="M">M</td><td class="L">L</td><td class="M">M</td><td class="H">H</td></tr>
+<tr><td>5D</td><td class="L">L</td><td class="L">L</td><td class="L">L</td><td class="L">L</td><td class="H">H</td></tr>
+</table>
+<p style="color:var(--dim)">Highlighted rows are recommended. No user dialogue was available; priorities derived from vision.md (learning, performance, single developer, no tests).</p>
+</div>
+
+<h2 id="rec">Recommended Approach</h2>
+<div class="card" style="border:2px solid var(--accent)">
+  <ol>
+    <li>Release/RelWithDebInfo preset + per-stage timers + benchmark path; record baseline (1A &rarr; 1B).</li>
+    <li>Stopgap if needed: invalidate on edit, stop caching a frustum subset, initialize the bitmap.</li>
+    <li>Replace the CPU Face cache with dirty-flag chunk meshes; chunk-level frustum test (2B).</li>
+    <li>Per-chunk persistent GPU buffers, pooled transfer buffer, regrow policy (3B).</li>
+    <li>Neighbor-aware culling with neighbor dirtying (4B); re-measure.</li>
+    <li>Hold layout (5A); revisit 5B, 4C, 4D, 3C/3D only on measured triggers.</li>
+  </ol>
+  <p><b>Rationale:</b> the cache is in the wrong layer and the frame pays for full regeneration and re-upload; per-chunk GPU meshes with dirty flags remove that cost while deleting code, then neighbor culling shrinks each mesh. Measuring first avoids optimizing Debug artifacts.</p>
+  <p><b>Trade-offs accepted:</b> multi-step OnRender refactor, cross-chunk coupling, N draw calls, bloated block storage.</p>
+  <p><b>Assumptions:</b> edits are rare; Release frames are CPU-bound on mesh/upload; SDL3 GPU handles per-chunk buffers cheaply; 4-chunk scale stays small. If Release is GPU-bound or well under budget, stop after step 1 and the bug fixes (2C becomes reasonable). If edits become frequent, revisit 3D.</p>
+  <p><b>Confidence:</b> medium.</p>
+</div>
+
+<details><summary>Why not the others</summary>
+<ul>
+  <li>1A alone too coarse; 1C premature dependency; 1D unvalidated and the stale cache distorts baselines.</li>
+  <li>2A alone leaves the pipeline running each frame; 2C loses headroom (valid fallback if Release is fast); 2D needs real LOD.</li>
+  <li>3A rebuilds on camera motion and re-uploads all on any edit; 3C no evidence of draw-call bottleneck; 3D allocator complexity without scale need.</li>
+  <li>4A alone is a subset of 4B; 4C needs tileable textures/atlas; 4D mostly bandwidth, largely obviated by Area 3.</li>
+  <li>5B/5C/5D now: refactor cost exceeds current benefit at 4 chunks.</li>
+</ul></details>
+
+<details id="deferred"><summary>Deferred ideas</summary>
+<ul>
+  <li>Real LOD with hysteresis and multi-LOD storage (F10).</li>
+  <li>Occlusion culling (commit message claims it; HEAD has none).</li>
+  <li>Texture atlas/array, mipmaps, duplicate sampler cleanup, blend review (F14).</li>
+  <li>Threaded chunk generation/meshing; streaming/eviction.</li>
+  <li>World-gen fixes: noise ignoring chunk offset, no heightmap cache (F17).</li>
+  <li>Small recomputes: dirty-flag frustum/view/proj, constexpr gravity dir, DDA chunk pointer reuse, <code>unordered_map</code>/last-chunk cache, Int3 hash (F11-F13).</li>
+  <li>Concurrency review: <code>par_unseq</code> atomics, E-key edit vs render (F15).</li>
+  <li>Unrelated bugs: double <code>SDL_DestroySurface</code> (951, 1062), <code>atPos.y</code> used for z (1192), dead line pass, integer FPS averaging.</li>
+  <li>Lighting/AO and GPU-driven culling.</li>
+</ul></details>
+</main>
+</body>
+</html>

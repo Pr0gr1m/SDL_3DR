@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Research Report — performance-gaps-caching</title>
+<style>
+:root {
+  --bg:#f6f7f9; --surface:#fff; --border:#e2e5ea; --text:#1a1d23; --dim:#6b7280;
+  --accent:#4f46e5; --accent-soft:#eef2ff; --ok:#16a34a; --ok-soft:#ecfdf3;
+  --warn:#d97706; --warn-soft:#fffbeb; --crit:#dc2626; --crit-soft:#fef2f2;
+  --info:#2563eb; --info-soft:#eff6ff; --radius:10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111418; --surface:#1a1f26; --border:#2e3640; --text:#e6e9ee; --dim:#9aa4b2;
+    --accent:#818cf8; --accent-soft:#26294a; --ok:#4ade80; --ok-soft:#11291a;
+    --warn:#fbbf24; --warn-soft:#2e2410; --crit:#f87171; --crit-soft:#321616;
+    --info:#60a5fa; --info-soft:#15233a; }
+}
+* { box-sizing:border-box; }
+body { margin:0 auto; max-width:1100px; padding:24px 20px 64px; background:var(--bg);
+  color:var(--text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+h1 { font-size:22px; letter-spacing:-.01em; } h2 { font-size:16px; margin-top:28px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; margin:14px 0; }
+.badge { display:inline-block; font-size:11px; font-weight:600; text-transform:uppercase;
+  letter-spacing:.04em; padding:2px 8px; border-radius:99px; background:var(--accent-soft); color:var(--accent); }
+.sev { display:inline-block; font-size:10.5px; font-weight:700; text-transform:uppercase;
+  padding:1.5px 7px; border-radius:99px; margin-right:6px; }
+.sev.critical { background:var(--crit-soft); color:var(--crit); }
+.sev.warning  { background:var(--warn-soft); color:var(--warn); }
+.sev.info     { background:var(--info-soft); color:var(--info); }
+.pass { color:var(--ok); font-weight:600; } .fail { color:var(--crit); font-weight:600; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+th { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px;
+  background:var(--accent-soft); padding:1px 5px; border-radius:4px; }
+details > summary { cursor:pointer; font-weight:600; }
+.crumbs { display:flex; gap:14px; font-size:13px; margin-bottom:18px; flex-wrap:wrap; }
+.crumbs a.md { margin-left:auto; color:var(--dim); }
+.crumbs .here { font-weight:650; color:var(--text); }
+.tiles { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
+.tile { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:10px 16px; text-align:center; min-width:90px; }
+.tile b { display:block; font-size:20px; letter-spacing:-.01em; }
+.tile span { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
+.tldr { border-left:4px solid var(--accent); }
+.caution { border-left:4px solid var(--warn); background:var(--warn-soft); }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+.grid .card { margin:0; }
+</style>
+</head>
+<body>
+<nav class="crumbs">
+  <a href="../dashboard.html">&larr; Dashboard</a>
+  <span class="here">Report</span>
+  <a href="research-report.md" target="_blank" rel="noopener" class="md">md twin &#8599;</a>
+</nav>
+<header>
+  <h1>Performance Gaps and Caching in SDL_3DR <span class="badge">research report</span></h1>
+  <div style="color:var(--dim)">Technical research, static analysis &middot; 2026-09-29 &middot; <a href="../analysis/synthesis.md" target="_blank" rel="noopener">synthesis.md</a></div>
+</header>
+
+<div class="tiles">
+  <div class="tile"><b>17</b><span>findings</span></div>
+  <div class="tile"><b>6</b><span>finding files</span></div>
+  <div class="tile"><b>23</b><span>commits reviewed</span></div>
+  <div class="tile"><b>Med-High</b><span>structural confidence</span></div>
+  <div class="tile"><b>0</b><span>profiled measurements</span></div>
+</div>
+
+<section class="card caution">
+  <b>Caution: nothing was profiled.</b> All impact ratings are heuristic. The build sets no optimization flags, so a Debug build likely inflates STL copy/allocation costs. Measure in Release first.
+</section>
+
+<section class="card tldr">
+  <h2 style="margin-top:0">TL;DR</h2>
+  <ul>
+    <li>The only cache (per-chunk CPU list of world-space Faces) is broken: inverted branch (<code>App.cpp:1418</code>), never invalidated, and it bakes in the first frame's frustum-culled subset.</li>
+    <li>Even on a hit, each frame deep-copies, re-flattens, regenerates 60 B vertices and re-uploads the whole scene via a new transfer buffer; no per-chunk GPU mesh exists.</li>
+    <li>Hidden-face culling, LOD and occlusion are absent or disabled; no optimization build config.</li>
+  </ul>
+  <h3>Key Decisions</h3>
+  <ul>
+    <li>Measure in Release with frame-time stats first &mdash; every ranking is unmeasured.</li>
+    <li>Fix cache correctness first (low effort) &mdash; a stale or camera-dependent cache blocks any caching strategy.</li>
+    <li>Then per-chunk persistent GPU meshes with a dirty flag &mdash; removes copy/flatten/upload churn together.</li>
+    <li>Then neighbor-aware hidden-face culling &mdash; largest expected geometry reduction.</li>
+  </ul>
+  <h3>Open Questions / Risks</h3>
+  <ul>
+    <li>Real build type behind the only FPS claim (79&rarr;89, commit 9274f71) is unknown, likely Debug.</li>
+    <li>All struct sizes are estimates (no sizeof run).</li>
+    <li>Runtime effect of the inverted branch and of the vertex-buffer overflow risk not run.</li>
+    <li>Commit f36f85d says "Occlusion culling done" but HEAD has none.</li>
+  </ul>
+</section>
+
+<p>Contents: <a href="#gaps">Prioritized gaps</a> &middot; <a href="#findings">Findings</a> &middot; <a href="#insights">Insights</a> &middot; <a href="#contra">Contradictions</a> &middot; <a href="#swot">SWOT</a> &middot; <a href="#recs">Recommendations</a> &middot; <a href="#evidence">Evidence</a></p>
+
+<main>
+<h2 id="gaps">Prioritized gap table</h2>
+<table>
+<tr><th>#</th><th>Gap</th><th>Impact</th><th>Effort</th><th>Confidence</th></tr>
+<tr><td>0</td><td>No Release/optimization config; measure first</td><td>High (validity)</td><td>Low</td><td>High config / Med runtime</td></tr>
+<tr><td>1</td><td>Inverted isValidCache branch + uninitialized bitmap</td><td>High (correctness)</td><td>Low</td><td>High</td></tr>
+<tr><td>2</td><td>No invalidation on edit</td><td>High (correctness)</td><td>Low</td><td>High</td></tr>
+<tr><td>3</td><td>Cache stores frustum-culled subset</td><td>High (correctness)</td><td>Low</td><td>High</td></tr>
+<tr><td>4</td><td>reserve(4096) before hit check, per chunk per frame</td><td>Med-High</td><td>Low</td><td>High</td></tr>
+<tr><td>5</td><td>Deep copy on hit + second flatten copy</td><td>Med</td><td>Low</td><td>High</td></tr>
+<tr><td>6</td><td>Full Face&rarr;Vertex3D regen + full upload each frame; no per-chunk GPU mesh</td><td>High</td><td>Med-High</td><td>High</td></tr>
+<tr><td>7</td><td>New transfer buffer + vertex vector per frame</td><td>Med</td><td>Med</td><td>High</td></tr>
+<tr><td>8</td><td>Hidden-face culling off/buggy; 12 faces/block; non-indexed 60 B verts</td><td>High</td><td>Med</td><td>High</td></tr>
+<tr><td>9</td><td>Vertex buffer sized once (overflow risk)</td><td>Med (correctness)</td><td>Low</td><td>Medium</td></tr>
+<tr><td>10</td><td>LOD disabled; single-slot cache</td><td>Med</td><td>Med</td><td>High</td></tr>
+<tr><td>11</td><td>Frustum/view/proj recomputed when static</td><td>Low-Med</td><td>Low</td><td>High</td></tr>
+<tr><td>12</td><td>Empty chunks rescanned each frame</td><td>Low</td><td>Low</td><td>High</td></tr>
+<tr><td>13</td><td>Chunk storage bloat, std::map lookup, weak Int3 hash, per-step raycast lookup</td><td>Low-Med</td><td>Med</td><td>Medium</td></tr>
+<tr><td>14</td><td>Blend on, no mips, duplicate sampler, no atlas</td><td>Low</td><td>Low</td><td>Med-High</td></tr>
+<tr><td>15</td><td>par_unseq with atomic slot allocation</td><td>Low</td><td>Low</td><td>Medium</td></tr>
+</table>
+
+<h2 id="findings">Findings</h2>
+<table>
+<tr><th>#</th><th>Finding</th><th>Category</th><th>Confidence</th><th>Sources</th></tr>
+<tr><td>F1</td><td>isValidCache branch inverted; first build copies uninitialized bitmap</td><td>Cache correctness</td><td><span class="sev info">High</span></td><td>5 (verified)</td></tr>
+<tr><td>F2</td><td>Cache never invalidated; E-key edit leaves stale mesh</td><td>Cache correctness</td><td><span class="sev info">High</span></td><td>3 (verified)</td></tr>
+<tr><td>F3</td><td>Cache stores frustum-culled subset</td><td>Cache correctness</td><td><span class="sev info">High</span></td><td>4</td></tr>
+<tr><td>F4</td><td>reserve before hit check, per chunk per frame</td><td>Allocation</td><td><span class="sev info">High</span></td><td>5 (verified)</td></tr>
+<tr><td>F5</td><td>Deep copy on hit and miss; second flatten copy</td><td>Copies</td><td><span class="sev info">High</span></td><td>5 (verified)</td></tr>
+<tr><td>F6</td><td>Full vertex regen + upload each frame; no per-chunk GPU mesh</td><td>GPU/frame</td><td><span class="sev info">High</span></td><td>3</td></tr>
+<tr><td>F7</td><td>New transfer buffer and vertex vector each frame</td><td>GPU/frame</td><td><span class="sev info">High</span></td><td>2</td></tr>
+<tr><td>F8</td><td>Hidden-face culling off and buggy; 12 faces/block</td><td>Geometry</td><td><span class="sev info">High</span></td><td>4 (flags verified)</td></tr>
+<tr><td>F9</td><td>Vertex buffer created once; overflow risk</td><td>GPU correctness</td><td><span class="sev warning">Medium</span></td><td>2</td></tr>
+<tr><td>F10</td><td>LOD hard-coded 0; single cachedLOD slot</td><td>LOD</td><td><span class="sev info">High</span></td><td>3</td></tr>
+<tr><td>F11</td><td>Frustum/view/projection rebuilt each frame</td><td>Recompute</td><td><span class="sev info">High</span></td><td>2</td></tr>
+<tr><td>F12</td><td>Empty chunks rescanned each frame</td><td>Recompute</td><td><span class="sev info">High</span></td><td>3</td></tr>
+<tr><td>F13</td><td>Chunk storage bloat, std::map lookup, weak Int3 hash</td><td>Memory/lookup</td><td><span class="sev warning">Medium</span></td><td>4</td></tr>
+<tr><td>F14</td><td>Blend on, no mips, duplicate sampler, single texture, double DestroySurface</td><td>GPU misc</td><td><span class="sev info">Med-High</span></td><td>1</td></tr>
+<tr><td>F15</td><td>par_unseq + atomic slot allocation</td><td>Concurrency</td><td><span class="sev warning">Medium</span></td><td>2</td></tr>
+<tr><td>F16</td><td>No Release/LTO config; toolchain mismatch; no measurement infra</td><td>Build</td><td><span class="sev info">High (config)</span></td><td>1</td></tr>
+<tr><td>F17</td><td>World gen single-threaded, no heightmap cache; noise ignores chunk offset</td><td>World gen</td><td><span class="sev info">High</span></td><td>1</td></tr>
+</table>
+
+<h2 id="insights">Key insights</h2>
+<div class="grid">
+  <div class="card"><b>Cache alone will not help</b><br>Hit path still copies, flattens, regenerates and uploads. High confidence.</div>
+  <div class="card"><b>Camera-dependent cache is wrong</b><br>Cache the full chunk mesh; cull at chunk/draw level. High.</div>
+  <div class="card"><b>Per-chunk GPU meshes</b><br>Highest leverage; subsumes copy/flatten/upload. Direction high, magnitude unknown.</div>
+  <div class="card"><b>Hidden-face culling</b><br>Likely biggest geometry cut; terrain is shallow so density-dependent. Medium.</div>
+  <div class="card"><b>Build-type confound</b><br>Past "optimization" claims likely measured unoptimized. Medium.</div>
+  <div class="card"><b>Worldgen/raycast/math minor</b><br>Matter only with streaming or larger worlds. Medium.</div>
+</div>
+
+<h2 id="contra">Contradictions and discrepancies</h2>
+<ul>
+  <li><b>Occlusion culling:</b> culling-lod finds none; commit f36f85d says "Occlusion culling done". grep of <code>src</code> finds no "occlu"; treated as absent at HEAD (Medium).</li>
+  <li><b>Reserve size:</b> ~1.7 MB vs ~3.5 MB per chunk per frame; both unmeasured estimates, same order of magnitude.</li>
+  <li><b>Chunk map:</b> one gatherer says unordered_map; others and <code>ChunkManager.h:41</code> say <code>std::map</code>.</li>
+  <li><b>Vertex buffer:</b> resize/WaitForGPUIdle path is dead (flag false); overflow on growth is the live risk.</li>
+</ul>
+
+<h2 id="swot">SWOT</h2>
+<div class="grid">
+  <div class="card"><b>Strengths</b><br>2 draw calls; cheap correct chunk frustum test; race-free per-chunk parallel meshing; static GPU resources created once.</div>
+  <div class="card"><b>Weaknesses</b><br>Broken cache; full re-upload per frame; heavy per-block data; no measurement.</div>
+  <div class="card"><b>Opportunities</b><br>Per-chunk GPU meshes, hidden-face culling, compact vertices, Release + LTO, real LOD.</div>
+  <div class="card"><b>Threats</b><br>Buffer overflow on growth; stale geometry after edits; unbounded memory as world scales.</div>
+</div>
+
+<h2 id="recs">Recommendations</h2>
+<table>
+<tr><th>Pri</th><th>Recommendation</th><th>Effort</th><th>Rationale / risk</th></tr>
+<tr><td>0</td><td>Release/RelWithDebInfo preset (optional LTO); record frame-time (avg/p95) on a fixed scene</td><td>Low</td><td>Validates everything else</td></tr>
+<tr><td>1</td><td>Fix cache: correct branch, init bitmap, cache full chunk mesh, invalidate on edit and neighbor edit</td><td>Low</td><td>Correctness; visible behaviour change</td></tr>
+<tr><td>2</td><td>Move reserve after hit/empty checks; reference instead of copying lodBlocks</td><td>Low</td><td>Cheap alloc/copy savings</td></tr>
+<tr><td>3</td><td>Skip rebuild when unchanged; persistent transfer buffer; buffer growth policy</td><td>Med</td><td>Removes churn and overflow risk</td></tr>
+<tr><td>4</td><td>Per-chunk GPU vertex buffers with dirty flag</td><td>Med-High</td><td>Largest expected win; larger refactor, justify with profile</td></tr>
+<tr><td>5</td><td>Fix/enable neighbor-aware face culling; compact/indexed vertices</td><td>Med</td><td>Density-dependent</td></tr>
+<tr><td>6</td><td>Small items: dirty-flag frustum/view/proj, constexpr gravity dir, chunk reuse in DDA, unordered_map, bitmask move states</td><td>Low</td><td>Small gains at current scale</td></tr>
+<tr><td>7</td><td>Later: real LOD w/ hysteresis, atlas/mips, streaming/eviction, block-id storage</td><td>Med-High</td><td>Only as world grows</td></tr>
+</table>
+
+<h2 id="evidence">Evidence and citations</h2>
+<details><summary>Source spot-checks</summary>
+<ul>
+  <li><code>App.cpp:1394-1397</code>: hit path, deep copy <code>chunkLODBlocks[idx] = chunk.cache.lodBlocks</code>.</li>
+  <li><code>App.cpp:1390-1391</code>: reserve before hit check.</li>
+  <li><code>App.cpp:1418-1433</code>: inverted branch.</li>
+  <li><code>App.cpp:1548-1556</code>: isValidCache set true, lodBlocks moved then copied, cachedLOD set.</li>
+  <li><code>App.cpp:41-42</code>: chunkFaceCulling=false, canCreateVertexBufferEveryFrame=false.</li>
+  <li>grep: <code>isValidCache</code> never assigned false; no "occlu" in src.</li>
+</ul></details>
+<details><summary>Sources and methodology</summary>
+<p>Six finding files (chunk-mesh-caching, gpu-frame, culling-lod, worldgen-memory, math-ray, build-config), 23 commits, CMake/vcpkg/build logs. Struct sizes (Face ~72 B, LODDBLock ~872 B, Vertex3D 60 B, Chunk ~160 KiB) are read-from-layout estimates, not compiler output. Gaps: no profiler data, edits vs render thread-safety unverified, build logs from another machine with mismatched toolchain.</p></details>
+</main>
+</body>
+</html>

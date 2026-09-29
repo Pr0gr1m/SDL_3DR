@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>High-Level Design - performance-gaps-caching</title>
+<style>
+:root{--bg:#f6f7f9;--surface:#fff;--border:#e2e5ea;--text:#1a1d23;--dim:#6b7280;--accent:#4f46e5;--accent-soft:#eef2ff;--ok:#16a34a;--ok-soft:#ecfdf3;--warn:#d97706;--warn-soft:#fffbeb;--crit:#dc2626;--crit-soft:#fef2f2;--info:#2563eb;--info-soft:#eff6ff;--radius:10px}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--surface:#1a1f26;--border:#2e3640;--text:#e6e9ee;--dim:#9aa4b2;--accent:#818cf8;--accent-soft:#26294a;--ok:#4ade80;--ok-soft:#11291a;--warn:#fbbf24;--warn-soft:#2e2410;--crit:#f87171;--crit-soft:#321616;--info:#60a5fa;--info-soft:#15233a}}
+*{box-sizing:border-box}body{margin:0 auto;max-width:1100px;padding:24px 20px 64px;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}h1{font-size:22px;letter-spacing:-.01em}h2{font-size:16px;margin-top:28px}h3{font-size:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin:14px 0}
+.badge{display:inline-block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;overflow:auto;font-size:12px}pre code{background:none;padding:0}
+details>summary{cursor:pointer;font-weight:600}
+.crumbs{display:flex;gap:14px;font-size:13px;margin-bottom:18px;flex-wrap:wrap}.crumbs a.md{margin-left:auto;color:var(--dim)}.crumbs .here{font-weight:650;color:var(--text)}
+.tiles{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;text-align:center;min-width:90px}
+.tile b{display:block;font-size:20px;letter-spacing:-.01em}.tile span{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.tldr{background:var(--accent-soft);border:1px solid var(--border);border-radius:var(--radius);padding:4px 18px 10px}
+.st{background:var(--ok-soft);color:var(--ok)}
+</style></head><body>
+<nav class="crumbs"><a href="../dashboard.html">← Dashboard</a><a href="research-report.html">Report</a><a href="solution-exploration.html">Exploration</a><span class="here">Design</span><a href="decision-log.html">Decision Log</a><a href="high-level-design.md" target="_blank" rel="noopener" class="md">md twin ↗</a></nav>
+<header><h1>High-Level Design: Dirty-Flag Per-Chunk GPU Meshes for SDL_3DR</h1><span class="badge">high-level design</span> · generated 2026-09-29 · <a href="high-level-design.md" target="_blank" rel="noopener">md twin</a></header>
+<div class="tiles"><div class="tile"><b>7</b><span>components</span></div><div class="tile"><b>5</b><span>ADRs</span></div><div class="tile"><b>Dirty-flag</b><span>per-chunk GPU meshes</span></div><div class="tile"><b>4</b><span>stages</span></div><div class="tile"><b>Medium</b><span>confidence</span></div></div>
+<section class="tldr"><h2>TL;DR</h2><ul>
+<li>Replace the broken CPU Face cache and per-frame full-scene rebuild/upload with <b>per-chunk dirty-flag meshes owned on the GPU</b> (one persistent <code>SDL_GPUBuffer</code> per chunk, rebuilt only when dirty).</li>
+<li>Chunk-level frustum culling replaces per-block culling; neighbor-aware hidden-face culling shrinks meshes; boundary edits dirty neighbor chunks.</li>
+<li>Staged order: measure, dirty flag, GPU buffers, neighbor culling. Block storage left alone.</li>
+<li>Dependency-free (SDL3 + stdlib). Confidence medium: nothing profiled.</li></ul>
+<h2>Key Decisions</h2><ul>
+<li>Measurement: in-app timers + benchmark path, no build-config change; relative-only if Debug (<a href="decision-log.html#adr-001">ADR-001</a>).</li>
+<li>Dirty flag replaces Face cache (<a href="decision-log.html#adr-002">ADR-002</a>).</li>
+<li>Per-chunk persistent GPU buffers, pooled transfer, regrow policy (<a href="decision-log.html#adr-003">ADR-003</a>).</li>
+<li>Neighbor-aware cross-chunk culling, chunk-local vertices, stated boundary policy (<a href="decision-log.html#adr-004">ADR-004</a>).</li>
+<li>Keep <code>std::optional&lt;Object&gt;</code> for now (<a href="decision-log.html#adr-005">ADR-005</a>).</li></ul>
+<h2>Open Questions / Risks</h2><ul>
+<li>Magnitudes unmeasured; Debug timings are relative-only and cannot settle absolute questions (e.g. GPU-bound or not).</li>
+<li>Thread safety of E-key edits vs parallel meshing unverified; dirty flag must be race-free.</li>
+<li>Deferred release of GPU buffers still referenced by in-flight frames.</li>
+<li>Unloaded-neighbor boundary policy (air vs solid) must be stated.</li>
+<li>Per-chunk draw calls may need revisiting if chunk count grows.</li>
+<li>Toolchain mismatch (MinGW logs vs MSVC-triplet vcpkg): real build may differ.</li></ul></section>
+<p>Contents: <a href="#overview">Overview</a> · <a href="#arch">Architecture</a> · <a href="#components">Components</a> · <a href="#flow">Data Flow</a> · <a href="#integration">Integration</a> · <a href="#stages">Stages</a> · <a href="#decisions">Decisions</a> · <a href="#examples">Examples</a> · <a href="#scope">Scope</a> · <a href="#success">Success</a></p>
+<main>
+<h2 id="overview">Design Overview</h2><div class="card">
+<p>SDL_3DR is a single-executable C++23 voxel renderer on SDL3 GPU/Vulkan. Its only cache (<code>Chunk::cache</code>, CPU world-space Faces) is inverted, never invalidated and camera-dependent, and every frame still copies, flattens, regenerates 60 B vertices and re-uploads the whole scene through a fresh transfer buffer. Beneficiary: the single developer (frame headroom plus learning goals).</p>
+<p>The chosen approach moves the cache to the GPU layer. Each <code>Chunk</code> gains <code>meshDirty</code> and a GPU mesh handle. A single-threaded remesh step regenerates only dirty chunks (chunk-local, exposed faces only, consulting neighbors), uploads via a pooled transfer buffer, and clears the flag. Rendering frustum-tests whole chunks and draws one buffer per visible chunk. A FrameProfiler times each stage; a fixed benchmark path makes runs comparable.</p></div>
+<h2 id="arch">Architecture</h2>
+<h3>System Context (C4 Level 1, Mermaid source)</h3>
+<pre><code>flowchart LR
+    Player([Player / Developer<br/>keyboard + mouse]) --&gt;|input events| App[SDL_3DR<br/>voxel renderer]
+    App --&gt;|window, swapchain, GPU commands| SDL[SDL3 + SDL GPU<br/>Vulkan backend]
+    App --&gt;|load textures / fonts| Assets[(Texture assets<br/>+ compiled SPIR-V shaders)]
+    App --&gt;|frame stats: log line / on-screen text| Player
+    SDL --&gt;|draw calls| GPU[[GPU / driver]]</code></pre>
+<h3>Container Overview (C4 Level 2, Mermaid source)</h3>
+<pre><code>flowchart TB
+    subgraph EXE[SDL_3DR executable]
+        App[App<br/>main loop, input, physics,<br/>OnRender orchestration]
+        World[World / Voxels<br/>ChunkManager + Chunk N=16<br/>block data, meshDirty, GPU mesh handle]
+        Mesher[Chunk Mesher<br/>dirty chunk -&gt; chunk-local<br/>exposed-face vertices]
+        GpuMesh[GPU Mesh Store<br/>per-chunk SDL_GPUBuffer,<br/>pooled transfer buffer, regrow policy]
+        Prof[FrameProfiler<br/>scope timers, ring buffer,<br/>benchmark path]
+        Tex[TextureManager]
+        Cam[Camera + frustum]
+    end
+    App --&gt; World
+    App --&gt; Cam
+    App --&gt; Prof
+    App --&gt; Tex
+    App --&gt;|visible, dirty chunks| Mesher
+    Mesher --&gt;|reads blocks + neighbors| World
+    Mesher --&gt;|vertices| GpuMesh
+    GpuMesh --&gt;|copy pass / draw| SDL[SDL GPU API]
+    Tex --&gt; SDL</code></pre>
+<p>New logical units: Chunk Mesher, GPU Mesh Store, FrameProfiler (may live inside existing classes; decided at specification).</p>
+<h2 id="components">Key Components</h2>
+<table><tr><th>Component</th><th>Purpose</th><th>Responsibilities</th><th>Key interfaces</th><th>Dependencies</th></tr>
+<tr><td>App (existing)</td><td>Frame loop, GPU device</td><td>Frustum test, remesh dirty chunks, draw visible chunks, route edits to dirty marking, own profiler</td><td><code>OnRender</code>, edit path</td><td>ChunkManager, Camera, GPU Mesh Store, FrameProfiler, TextureManager</td></tr>
+<tr><td>ChunkManager / Chunk (extended)</td><td>Chunk data and mesh state</td><td>Blocks; <code>meshDirty</code>; GPU handle; neighbor lookup; dirty self + boundary neighbors on edit</td><td><code>getChunk</code>, <code>markDirty</code>, <code>setBlock</code></td><td>Object, Int3</td></tr>
+<tr><td>Chunk Mesher (new)</td><td>Blocks to vertices</td><td>Emit faces only where neighbor is air; consult adjacent chunks; unloaded-neighbor policy; chunk-local output</td><td><code>buildMesh</code></td><td>ChunkManager (read-only)</td></tr>
+<tr><td>GPU Mesh Store (new)</td><td>Per-chunk GPU buffers</td><td>Create/regrow to capacity; pooled transfer upload; deferred release; free on unload</td><td><code>upload</code>, <code>release</code></td><td>SDL GPU device</td></tr>
+<tr><td>FrameProfiler (new)</td><td>Per-stage measurement</td><td>Scope timers, avg/p95/max, periodic report, benchmark path</td><td><code>Scope</code>, <code>report</code></td><td>SDL timing, logging</td></tr>
+<tr><td>Camera (existing)</td><td>View and frustum</td><td>Frustum planes for chunk AABB test; per-chunk offset for local vertices</td><td><code>frustumPlanes</code></td><td>Matrix types</td></tr>
+<tr><td>TextureManager (existing)</td><td>Block textures</td><td>Unchanged</td><td>bind texture</td><td>SDL_image</td></tr></table>
+<h2 id="flow">Data Flow</h2><div class="card"><ol>
+<li>Generation or E-key edit changes blocks; <code>setBlock</code> sets <code>meshDirty</code> on the chunk and, on a boundary cell, on the adjacent chunk.</li>
+<li>Frame start: frustum computed; per-chunk AABB test gives the visible set.</li>
+<li>Remesh (single-threaded, before render pass): dirty chunks are meshed (chunk-local exposed faces, neighbors read via ChunkManager), uploaded through the pooled transfer buffer in one copy pass, count/capacity updated, flag cleared.</li>
+<li>Render pass: per visible non-empty chunk, set offset, bind buffer, draw. No CPU vertex work for clean chunks.</li>
+<li>FrameProfiler times each stage and reports periodically.</li></ol>
+<p>Stage 2 keeps the old scene-wide upload but regenerates CPU vertices only for dirty chunks.</p></div>
+<h2 id="integration">Integration Points</h2><ul>
+<li><b>App::OnRender:</b> largest change; replaces cache lookup, flatten, Face-to-Vertex3D regeneration and the single scene upload.</li>
+<li><b>Edit path (E-key):</b> must call dirty marking.</li>
+<li><b>ChunkManager:</b> neighbor accessor by chunk coordinate (existing <code>chunkMap</code>); unload hook releases GPU buffers.</li>
+<li><b>Shaders/pipeline:</b> chunk-local vertices need a per-chunk translation; <code>Vertex3D</code> layout can stay.</li>
+<li><b>SDL GPU:</b> buffer create/release, transfer map, copy pass, deferred release; no new dependencies.</li>
+<li><b>Logging/UI:</b> profiler output via existing logging macros or SDL3_ttf.</li>
+<li><b>Threading:</b> <code>std::execution::par</code> meshing only if each task owns its output and the dirty flag is not raced.</li></ul>
+<h2 id="stages">Implementation Stages and Verification</h2>
+<table><tr><th>Stage</th><th>Work</th><th>Verify</th></tr>
+<tr><td>0. Measure</td><td>FrameProfiler, per-stage scope timers, avg/p95/max, fixed benchmark camera path; no CMake/preset change; baseline labelled relative if Debug.</td><td>Two benchmark runs agree within noise; stage timings sum near frame time; timer overhead small.</td></tr>
+<tr><td>1. Optional stopgap (2A subset)</td><td>Invalidate on edit; do not cache frustum subset; initialize bitmap. Only if stage 2 delayed.</td><td>Edited block visibly changes; turning camera shows no missing chunks.</td></tr>
+<tr><td>2. Dirty-flag mesh</td><td>Add <code>meshDirty</code>; remove <code>ChunkMeshCache</code>, <code>isValidCache</code>, <code>cachedBlockPresence</code>; chunk-level culling; neighbor dirtying; reserve/copy only for dirty chunks.</td><td>Clean frames: remesh timer zero; edit remeshes only edited chunk plus boundary neighbor; no stale geometry; static view identical to baseline.</td></tr>
+<tr><td>3. GPU buffers</td><td>Per-chunk <code>SDL_GPUBuffer</code>, pooled transfer buffer, capacity + regrow, deferred release, per-chunk draw with offset.</td><td>Upload zero on clean frames; camera motion no upload; forced growth no overflow; validation layers if available; visuals match stage 2.</td></tr>
+<tr><td>4. Neighbor culling</td><td>Fix z-guard typos (App.cpp ~1467, 1473) first; mesher consults neighbors; unloaded-neighbor policy.</td><td>Vertex count drops vs stage 3; no holes at borders; border edit re-meshes both chunks; world-edge follows policy.</td></tr></table>
+<h2 id="decisions">Design Decisions</h2>
+<table><tr><th>ADR</th><th>Decision</th><th>Alternatives</th></tr>
+<tr><td><a href="decision-log.html#adr-001">ADR-001</a></td><td>In-app per-stage timers + benchmark path, no build-config change</td><td><a href="solution-exploration.html">Area 1</a></td></tr>
+<tr><td><a href="decision-log.html#adr-002">ADR-002</a></td><td>Dirty-flag chunk mesh replaces Face cache</td><td><a href="solution-exploration.html">Area 2</a></td></tr>
+<tr><td><a href="decision-log.html#adr-003">ADR-003</a></td><td>Per-chunk persistent GPU buffers</td><td><a href="solution-exploration.html">Area 3</a></td></tr>
+<tr><td><a href="decision-log.html#adr-004">ADR-004</a></td><td>Neighbor-aware cross-chunk face culling</td><td><a href="solution-exploration.html">Area 4</a></td></tr>
+<tr><td><a href="decision-log.html#adr-005">ADR-005</a></td><td>Keep <code>std::optional&lt;Object&gt;</code> storage</td><td><a href="solution-exploration.html">Area 5</a></td></tr></table>
+<h2 id="examples">Concrete Examples</h2>
+<div class="card"><b>1. Static view.</b> Given no edits, when a frame renders, then no chunk is remeshed and no upload occurs; remesh/upload stages read ~0 ms; draws equal visible chunk count.</div>
+<div class="card"><b>2. Border edit.</b> Given a block removed on the boundary between chunks A and B, when the next frame runs, then A and B are remeshed and uploaded once, new faces appear on both sides, other chunks untouched.</div>
+<div class="card"><b>3. Buffer growth.</b> Given a chunk's vertex count exceeds capacity, when remeshed, then a larger buffer is allocated (old one released after in-flight frames complete) and rendering continues without overflow.</div>
+<h2 id="scope">Out of Scope</h2><ul>
+<li>Build-config changes (Release presets, LTO); external profilers (Tracy, RenderDoc, Nsight).</li>
+<li>Greedy meshing, indexed/packed vertices, indirect/multi-draw, sub-allocated buffer, atlas/mipmaps.</li>
+<li>Compact block ids, RLE/octree storage.</li>
+<li>Real LOD, occlusion culling, streaming/eviction, threaded generation, lighting/AO.</li>
+<li>World-gen fixes and unrelated bugs (double <code>SDL_DestroySurface</code>, <code>atPos.y</code> for z, empty line pass, integer FPS averaging).</li></ul>
+<h2 id="success">Success Criteria</h2><ul>
+<li>Clean frames do zero remesh and zero upload (profiler-verified).</li>
+<li>Camera motion alone triggers no rebuild or upload.</li>
+<li>An edit remeshes only the edited chunk plus boundary neighbors, with no stale or missing geometry.</li>
+<li>Scene vertex count drops after neighbor culling with no border holes.</li>
+<li>Frame time (avg and p95) on the benchmark path improves vs stage-0 baseline within the same build configuration.</li>
+<li>No vertex buffer overflow on mesh growth.</li></ul>
+</main>
+</body></html>

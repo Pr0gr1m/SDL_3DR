@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Implementation Verification — Dirty-Flag Per-Chunk GPU Meshes</title>
+<style>
+:root {
+  --bg:#f6f7f9; --surface:#fff; --border:#e2e5ea; --text:#1a1d23; --dim:#6b7280;
+  --accent:#4f46e5; --accent-soft:#eef2ff; --ok:#16a34a; --ok-soft:#ecfdf3;
+  --warn:#d97706; --warn-soft:#fffbeb; --crit:#dc2626; --crit-soft:#fef2f2;
+  --info:#2563eb; --info-soft:#eff6ff; --radius:10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111418; --surface:#1a1f26; --border:#2e3640; --text:#e6e9ee; --dim:#9aa4b2;
+    --accent:#818cf8; --accent-soft:#26294a; --ok:#4ade80; --ok-soft:#11291a;
+    --warn:#fbbf24; --warn-soft:#2e2410; --crit:#f87171; --crit-soft:#321616;
+    --info:#60a5fa; --info-soft:#15233a; }
+}
+* { box-sizing:border-box; }
+body { margin:0 auto; max-width:1100px; padding:24px 20px 64px; background:var(--bg);
+  color:var(--text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+h1 { font-size:22px; letter-spacing:-.01em; } h2 { font-size:16px; margin-top:28px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; margin:14px 0; }
+.badge { display:inline-block; font-size:11px; font-weight:600; text-transform:uppercase;
+  letter-spacing:.04em; padding:2px 8px; border-radius:99px; background:var(--accent-soft); color:var(--accent); }
+.sev { display:inline-block; font-size:10.5px; font-weight:700; text-transform:uppercase;
+  padding:1.5px 7px; border-radius:99px; margin-right:6px; }
+.sev.critical { background:var(--crit-soft); color:var(--crit); }
+.sev.warning  { background:var(--warn-soft); color:var(--warn); }
+.sev.info     { background:var(--info-soft); color:var(--info); }
+.pass { color:var(--ok); font-weight:600; } .fail { color:var(--crit); font-weight:600; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+th { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px;
+  background:var(--accent-soft); padding:1px 5px; border-radius:4px; }
+img.shot { max-width:100%; border:1px solid var(--border); border-radius:var(--radius); }
+details > summary { cursor:pointer; font-weight:600; }
+.crumbs { display:flex; gap:14px; font-size:13px; margin-bottom:18px; flex-wrap:wrap; }
+.crumbs a.md { margin-left:auto; color:var(--dim); }
+.crumbs .here { font-weight:650; color:var(--text); }
+.tiles { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
+.tile { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:10px 16px; text-align:center; min-width:90px; }
+.tile b { display:block; font-size:20px; letter-spacing:-.01em; }
+.tile span { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
+.banner { background:var(--warn-soft); border:1px solid var(--warn); border-left-width:6px;
+  border-radius:var(--radius); padding:14px 18px; margin:14px 0; }
+.banner h2 { margin:0 0 4px; font-size:18px; color:var(--warn); }
+.banner p { margin:0; }
+.st { font-weight:600; }
+.st.ok { color:var(--ok); } .st.warn { color:var(--warn); } .st.dim { color:var(--dim); }
+.toc { font-size:13px; margin:14px 0; color:var(--dim); }
+ul.tight { margin:6px 0; padding-left:20px; }
+.tbl-wrap { overflow-x:auto; }
+.tone-ok { color:var(--ok); }
+</style>
+</head>
+<body>
+<nav class="crumbs">
+  <a href="../dashboard.html">&larr; Dashboard</a>
+  <a href="../implementation/implementation-plan.html">Plan</a>
+  <span class="here">Verification</span>
+  <a href="completeness-report.md" target="_blank" rel="noopener">Completeness</a>
+  <a href="code-review-report.md" target="_blank" rel="noopener">Code Review</a>
+  <a href="pragmatic-review.md" target="_blank" rel="noopener">Pragmatic Review</a>
+  <a href="spec-audit.md" target="_blank" rel="noopener">Spec Audit</a>
+  <a href="implementation-verification.md" target="_blank" rel="noopener" class="md">md twin &#8599;</a>
+</nav>
+
+<header>
+  <h1>Implementation Verification: Dirty-Flag Per-Chunk GPU Meshes</h1>
+  <span class="badge">Implementation Verification</span>
+  <span style="color:var(--dim);font-size:12.5px;margin-left:8px">2026-09-29 &middot; <a href="implementation-verification.md" target="_blank" rel="noopener">implementation-verification.md</a></span>
+</header>
+
+<div class="banner">
+  <h2>Verdict (post-fix): Passed with Issues</h2>
+  <p>0 critical &middot; 3 warnings (2 fixable, 1 runtime-pending) &middot; 12 info. All 12 earlier fixable warnings from the first pass were addressed in one fix loop.</p>
+</div>
+
+<div class="tiles">
+  <div class="tile"><b>Passed w/ Issues</b><span>verdict</span></div>
+  <div class="tile"><b>0</b><span>critical</span></div>
+  <div class="tile"><b>3</b><span>warnings</span></div>
+  <div class="tile"><b>12</b><span>info</span></div>
+  <div class="tile"><b>31 / 41</b><span>plan steps done</span></div>
+</div>
+
+<section class="tldr">
+  <h2>TL;DR</h2>
+  <div class="card">
+    <ul class="tight">
+      <li>Verdict (post-fix): <strong>Passed with Issues</strong> &mdash; 0 critical, 3 warnings (2 fixable, 1 runtime-pending), 12 info. All 12 earlier fixable warnings from the first pass were addressed in one fix loop.</li>
+      <li><strong>Nothing was ever run</strong>: Windows application control blocks <code>build/SDL1.exe</code>; baseline, image identity, remesh/upload counters, edit checks, benchmark timings and the growth test are NOT RUN (pending user, see <code>implementation/work-log.md</code>).</li>
+      <li>Post-fix static re-review: no critical defect; refactored mesher emits identical triangles to the original layout; size_t/2^31 guards correct; docs updated. Clean build after fixes was incremental (0 warnings); a clean rebuild after the fix loop was not run.</li>
+      <li>Test suite skipped: the project has no tests (user decision).</li>
+    </ul>
+  </div>
+
+  <h2>Open Questions / Risks</h2>
+  <div class="card">
+    <ul class="tight">
+      <li>Unproven improvement: no baseline captured; the old baseline reads uninitialised <code>cachedBlockPresence</code> (audit H1) &mdash; capture from commit <code>cf9b275</code> with the sanity gate.</li>
+      <li>Growth path, lazy-create branch of <code>setBlock</code>, cycled uploads under Vulkan validation and chunk-border seams are unverified at runtime.</li>
+      <li><code>meshDirty</code> is cleared before <code>Upload</code> succeeds (<code>src/App.cpp:1352</code>); harmless today (failure quits) but wrong if the error becomes recoverable.</li>
+      <li><code>Chunk::PositionInBounds</code> <code>&lt;=</code> to <code>&lt;</code> also changes the place-block path at <code>App.cpp:1199</code> (outside the stated scope; looks correct).</li>
+      <li><code>vertex.spv</code> provenance vs <code>vertex.glsl</code> not independently confirmed beyond symbol names; commit both together.</li>
+      <li>Process note: the code-reviewer subagent did not write its own report; <code>code-review-report.md</code> is the orchestrator's transcription of its returned text (issue source "artifacts").</li>
+    </ul>
+  </div>
+</section>
+
+<nav class="toc">Contents:
+  <a href="#summary">Executive Summary</a> &middot;
+  <a href="#findings">Findings</a> &middot;
+  <a href="#checks">Per-Check Status</a> &middot;
+  <a href="#details">Check Details</a> &middot;
+  <a href="#history">Fix &amp; Re-Verification History</a> &middot;
+  <a href="#recs">Recommendations</a> &middot;
+  <a href="#checklist">Checklist</a>
+</nav>
+
+<main>
+<section id="summary">
+  <h2>Executive Summary</h2>
+  <div class="card">All five task groups are implemented, one fix loop was applied, and static re-verification passed with warnings only. Runtime verification remains entirely pending the user.</div>
+</section>
+
+<section id="findings">
+  <h2>Issues Requiring Attention</h2>
+  <div class="card tbl-wrap">
+  <table>
+    <thead><tr><th style="width:90px">Severity</th><th>Finding</th><th>Location</th><th>Fixable</th></tr></thead>
+    <tbody>
+      <tr><td><span class="sev warning">warning</span></td><td>Runtime verification pending for every stage; no baseline</td><td>&mdash;</td><td>No (not fixable here)</td></tr>
+      <tr><td><span class="sev warning">warning</span></td><td><code>meshDirty</code> cleared before <code>Upload</code> succeeds</td><td><code>src/App.cpp:1352</code></td><td>Yes (clear after success)</td></tr>
+      <tr><td><span class="sev warning">warning</span></td><td>Partial regrow on upload failure</td><td><code>src/ChunkMeshStore.cpp:30-46</code></td><td>Yes (same fix)</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>No <code>reserve</code> in mesher</td><td><code>ChunkMesher.cpp:39</code></td><td>Optional</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>Redundant add/subtract of <code>atPosition</code></td><td><code>ChunkMesher.cpp:58-60</code></td><td>&mdash;</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>Nesting depth 6</td><td><code>ChunkMesher.cpp:39-64</code></td><td>&mdash;</td></tr>
+      <tr><td><span class="sev info">info</span></td><td><code>setBlock</code> unused (kept per user mandate)</td><td>&mdash;</td><td>&mdash;</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>Commented-out code remains</td><td><code>App.cpp</code> 581-583, ~635-721, 831-833; <code>vertex.glsl:1-49</code></td><td>Optional</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>Uint32/size_t mix (safe under guard)</td><td>&mdash;</td><td>&mdash;</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>pow2 transfer growth</td><td>&mdash;</td><td>Accepted</td></tr>
+      <tr><td><span class="sev info">info</span></td><td><code>OnRender</code> ~130 lines</td><td>&mdash;</td><td>Optional (split)</td></tr>
+      <tr><td><span class="sev info">info</span></td><td><code>PositionInBounds</code> behaviour change</td><td><code>App.cpp:1199</code></td><td>&mdash;</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>Unverified <code>vertex.spv</code> provenance</td><td><code>vertex.glsl</code> / <code>vertex.spv</code></td><td>Commit both together</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>No clean rebuild after fix loop</td><td>&mdash;</td><td>Yes</td></tr>
+      <tr><td><span class="sev info">info</span></td><td>No final benchmark summary (step 5.7)</td><td>&mdash;</td><td>Runtime-pending</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="checks">
+  <h2>Per-Check Status</h2>
+  <div class="card tbl-wrap">
+  <table>
+    <thead><tr><th>Check</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Completeness</td><td><span class="st warn">Passed with issues</span> (runtime steps pending)</td></tr>
+      <tr><td>Test suite</td><td><span class="st dim">Skipped</span> (no tests)</td></tr>
+      <tr><td>Standards</td><td><span class="st warn">Mostly compliant</span></td></tr>
+      <tr><td>Documentation</td><td><span class="st ok">Adequate</span></td></tr>
+      <tr><td>Code review</td><td><span class="st warn">Issues found</span> (0 critical, 2 warnings)</td></tr>
+      <tr><td>Pragmatic review</td><td><span class="st ok">Appropriate</span></td></tr>
+      <tr><td>Reality check / production readiness / E2E / user docs</td><td><span class="st dim">Not run</span> (declined / not applicable)</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section id="details">
+  <h2>Check Details</h2>
+
+  <details class="card" open>
+    <summary>Implementation Plan Verification (completeness checker) &mdash; <a href="completeness-report.md" target="_blank" rel="noopener">completeness-report.md</a></summary>
+    <p>Passed with issues. 41 steps: 31 done, 4 skipped by decision (2.8, 2.10, 3.9, 4.5), 6 runtime steps open (1.9, 1.10, 2.9, 3.8, 4.4, 5.7) plus stage parent lines. Dead members (<code>numNonEmptyBlocks</code>, <code>isEmpty</code>, <code>uniformBuffer</code>, <code>didUserEditChunk</code>) have no remaining references; <code>ChunkCache.h</code> deleted. Stale project docs warning resolved.</p>
+  </details>
+
+  <details class="card">
+    <summary>Test Suite</summary>
+    <p>Skipped: no tests exist. Build: full clean build after group 5 (14/14, 0 warnings); incremental build after the fix loop succeeded with 0 warnings.</p>
+  </details>
+
+  <details class="card">
+    <summary>Standards Compliance</summary>
+    <p>Mostly compliant. Remaining: <code>setBlock</code> without runtime caller (user-mandated), ~20 lines pre-existing commented-out code (<code>App.cpp</code> 581-583, ~635-721, 831-833; <code>vertex.glsl:1-49</code>).</p>
+  </details>
+
+  <details class="card">
+    <summary>Documentation Completeness</summary>
+    <p>Adequate. <code>architecture.md</code> and <code>roadmap.md</code> updated in the fix loop; <code>spec.html</code> not regenerated after 3 minimal <code>spec.md</code> edits; work-log lacks a dated final-completion entry.</p>
+  </details>
+
+  <details class="card">
+    <summary>Code Review &mdash; <a href="code-review-report.md" target="_blank" rel="noopener">code-review-report.md</a></summary>
+    <p>Post-fix: 0 critical, 2 warnings, 8 info. All 5 earlier warnings resolved. New warnings: <code>meshDirty</code> cleared before upload success (<code>App.cpp:1352</code>) and partial regrow leaving stale meshes on upload failure (<code>ChunkMeshStore.cpp:30-46</code>) &mdash; same root cause.</p>
+  </details>
+
+  <details class="card">
+    <summary>Pragmatic Review &mdash; <a href="pragmatic-review.md" target="_blank" rel="noopener">pragmatic-review.md</a></summary>
+    <p>Post-fix: appropriate for scale; 0 critical/high, 1 medium residual (<code>FrameProfiler</code> 171 lines, accepted as roadmap item), 3 low. pow2 capacity and pooled transfer buffer accepted after overflow guards; <code>setBlock</code> kept per user mandate.</p>
+  </details>
+
+  <div class="card">Related report: <a href="spec-audit.md" target="_blank" rel="noopener">spec-audit.md</a></div>
+</section>
+
+<section id="history">
+  <h2>Fix &amp; Re-Verification History</h2>
+  <div class="card tbl-wrap">
+  <table>
+    <thead><tr><th>Issue (first pass)</th><th>Fix applied</th><th>Re-check outcome</th></tr></thead>
+    <tbody>
+      <tr><td>Mesher builds all faces before neighbor test</td><td>Neighbor check first; <code>Face</code> built only for exposed directions via <code>kFaceCorners</code> table</td><td><span class="tone-ok">&#10003;</span> Resolved &mdash; identical triangle order/winding/positions/UVs verified index by index</td></tr>
+      <tr><td>Oversized <code>reserve</code></td><td><code>reserve</code> removed; <code>numNonEmptyBlocks</code> and <code>isEmpty</code> deleted</td><td><span class="tone-ok">&#10003;</span> Resolved (now no reserve &mdash; info)</td></tr>
+      <tr><td><code>Uint32</code>/<code>bit_ceil</code> overflow</td><td><code>size_t</code> totals, 2^31 guard with <code>SDL_LogError</code></td><td><span class="tone-ok">&#10003;</span> Resolved</td></tr>
+      <tr><td>Transfer buffer over-allocation</td><td>Kept <code>bit_ceil</code> deliberately</td><td>Residual, accepted</td></tr>
+      <tr><td>Profiler log time skews next frame</td><td>Counter re-read after <code>Report()</code></td><td><span class="tone-ok">&#10003;</span> Resolved</td></tr>
+      <tr><td><code>setBlock</code> no caller</td><td>Kept (user mandate)</td><td>Residual, accepted</td></tr>
+      <tr><td>Commented-out code in <code>App.cpp</code></td><td>E-key and <code>ConstructChunkAtLine</code> blocks deleted; <code>uniformBuffer</code> removed</td><td>Partly resolved (some remains)</td></tr>
+      <tr><td><code>FrameProfiler</code> size, pow2</td><td>Kept</td><td>Residual, accepted</td></tr>
+      <tr><td>Stale docs</td><td><code>architecture.md</code>, <code>roadmap.md</code> updated</td><td><span class="tone-ok">&#10003;</span> Resolved</td></tr>
+      <tr><td>Work-log final entry / <code>spec.html</code></td><td>Not addressed</td><td>Residual (info)</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Extra fixes:</strong> swapchain result checked, <code>ToggleBenchmark</code> and <code>LogProfilerHeader</code> null guards, <code>kFreeModeProfilerWindowFrames</code> private, mesher header param named, stale <code>(void) result;</code> comment removed.</p>
+  </div>
+</section>
+
+<section id="recs">
+  <h2>Recommendations</h2>
+  <div class="card">
+    <ol class="tight">
+      <li>Run the pending interactive checks (capture baseline from <code>cf9b275</code> first) from a session where <code>SDL1.exe</code> is allowed.</li>
+      <li>Clear <code>meshDirty</code> only after a successful <code>Upload</code>.</li>
+      <li>Run a clean rebuild; commit <code>vertex.glsl</code> with <code>vertex.spv</code>.</li>
+      <li>Optionally add a surface-based <code>reserve</code>, delete remaining commented-out code, split <code>OnRender</code>.</li>
+    </ol>
+  </div>
+</section>
+
+<section id="checklist">
+  <h2>Verification Checklist</h2>
+  <div class="card">
+    <ul class="tight" style="list-style:none;padding-left:0">
+      <li>&#9745; Completeness check (twice)</li>
+      <li>&#9681; Test suite (none)</li>
+      <li>&#9745; Code review (twice)</li>
+      <li>&#9745; Pragmatic review (twice)</li>
+      <li>&#9744; Runtime verification (pending user)</li>
+    </ul>
+  </div>
+</section>
+</main>
+</body>
+</html>
