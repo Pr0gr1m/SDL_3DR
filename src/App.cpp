@@ -21,7 +21,6 @@
 #include "core/Camera.h"
 #include "core/Chunk.h"
 #include "core/Matrix4D.h"
-#include "core/Object.h"
 #include "core/Vertex3D.h"
 
 //POSITION IS FROM -1 TO 1
@@ -39,7 +38,7 @@ Vector startingCameraPos = Vector(0.f, 50.f, 0.f);
 Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
 std::unique_ptr<Camera> sceneCamera = nullptr;
 
-inline constexpr bool chunkFaceCulling = true; //on average it is better to keep true (For now)
+inline constexpr bool chunkFaceCulling = false; //on average it is better to keep true (For now)
 inline constexpr bool canCreateVertexBufferEveryFrame = false; //on average it is better to keep false (For now)
 inline constexpr Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
 inline constexpr float cameraMinYPosition = -5;
@@ -1386,7 +1385,7 @@ SDL_AppResult App::OnRender() {
 
                       //Distance from chunk center to player
                       float distance = distVector.Magnitude();
-                      auto LOD = chunk.didUserEditChunk ? 0 : GetLevelOfDetailFromDistance(distance);
+                      auto LOD = 0; //chunk.didUserEditChunk ? 0 : GetLevelOfDetailFromDistance(distance);
 
                       std::vector<LODDBLock> chunkLocalBlocks;
                       chunkLocalBlocks.reserve(ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ); //preallocate for 1 chunk, this is only once per thread so shouldnt be that bad
@@ -1413,10 +1412,10 @@ SDL_AppResult App::OnRender() {
                       };
 
                       //Prefill a 3D grid for faster access within the chunk
-                      std::array<bool, ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ> blockPresence;
+                      std::array<bool, ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ * ChunkManager::chunkSizeXYZ> blockPresence{};
 
                       //Rebuild block presence only when chunk cache is invalid
-                      if (!chunk.cache.isValidCache) {
+                      if (chunk.cache.isValidCache) {
                           for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
                               for (int y = 0; y < ChunkManager::chunkSizeXYZ; y += 1) {
                                   for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
@@ -1548,13 +1547,13 @@ SDL_AppResult App::OnRender() {
                       //Only populate cached chunk block presence if chunk was previously invalid
                       if (!chunk.cache.isValidCache) {
                           chunk.cache.cachedBlockPresence = std::move(blockPresence);
+                          chunk.cache.isValidCache = true;
                       }
 
                       chunk.cache.lodBlocks = std::move(chunkLocalBlocks); //lod blocks have global lifetime so they should have blocks moved into cache
                       chunkLODBlocks[idx] = chunk.cache.lodBlocks;
 
                       chunk.cache.cachedLOD = LOD;
-                      chunk.cache.isValidCache = true;
                   }
     );
 

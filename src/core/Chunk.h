@@ -74,6 +74,12 @@ public:
         return true;
     }
 
+    [[nodiscard]] bool isEmpty(int LOD) const {
+        if (cache.isValidCache && cache.cachedLOD == LOD) return cache.lodBlocks.empty();
+        for (const auto &b: blocks) if (b.has_value()) return false;
+        return true;
+    }
+
     [[nodiscard]] int numNonEmptyBlocks() const {
         int count = 0;
         for (const auto &b: blocks) if (b.has_value()) count++;

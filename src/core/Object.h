@@ -13,74 +13,68 @@
  */
 class Object {
 public:
-    Object() : mesh(nullptr), Position(0, 0, 0) {
-        rotationMatrix3D = {
-            1, 0, 0,
-            0, 1, 0,
-            0, 0, 1
-        };
+    Object() : mesh(nullptr), Position(0, 0, 0), alpha(0), beta(0), gamma(0) {
     }
 
-    Object(Mesh *m1, Vector pos) : mesh(m1), Position(pos) {
-        float alpha = 0, beta = 0, gamma = 0;
-
-        float cx = cos(alpha), sx = sin(alpha);
-        float cy = cos(beta), sy = sin(beta);
-        float cz = cos(gamma), sz = sin(gamma);
-
-        rotationMatrix3D = {
-            //Row 0 (X axis in world after rotation)
-            cy * cz,
-            sx * sy * cz - cx * sz,
-            cx * sy * cz + sx * sz,
-
-            //Row 1 (Y axis)
-            cy * sz,
-            sx * sy * sz + cx * cz,
-            cx * sy * sz - sx * cz,
-
-            //Row 2 (Z axis)
-            -sy,
-            sx * cy,
-            cx * cy
-        };
+    Object(Mesh *m1, Vector pos) : mesh(m1), Position(pos), alpha(0), beta(0), gamma(0) {
+        // float alpha = 0, beta = 0, gamma = 0;
+        //
+        // float cx = cos(alpha), sx = sin(alpha);
+        // float cy = cos(beta), sy = sin(beta);
+        // float cz = cos(gamma), sz = sin(gamma);
+        //
+        // rotationMatrix3D = {
+        //     //Row 0 (X axis in world after rotation)
+        //     cy * cz,
+        //     sx * sy * cz - cx * sz,
+        //     cx * sy * cz + sx * sz,
+        //
+        //     //Row 1 (Y axis)
+        //     cy * sz,
+        //     sx * sy * sz + cx * cz,
+        //     cx * sy * sz - sx * cz,
+        //
+        //     //Row 2 (Z axis)
+        //     -sy,
+        //     sx * cy,
+        //     cx * cy
+        // };
     }
 
-    Object(Mesh *mesh, Vector position, Vector rotAngle) : mesh(mesh), Position(position) {
-        float alpha = rotAngle.z;
-        float beta = rotAngle.y;
-        float gamma = rotAngle.x;
-
-        float cx = cos(alpha), sx = sin(alpha);
-        float cy = cos(beta), sy = sin(beta);
-        float cz = cos(gamma), sz = sin(gamma);
-
-        rotationMatrix3D = {
-            // Row 0 (X axis in world after rotation)
-            cy * cz,
-            sx * sy * cz - cx * sz,
-            cx * sy * cz + sx * sz,
-
-            // Row 1 (Y axis)
-            cy * sz,
-            sx * sy * sz + cx * cz,
-            cx * sy * sz - sx * cz,
-
-            // Row 2 (Z axis)
-            -sy,
-            sx * cy,
-            cx * cy
-        };
+    Object(Mesh *mesh, Vector position, Vector rotAngle) : mesh(mesh), Position(position), alpha(rotAngle.x), beta(rotAngle.y), gamma(rotAngle.z) {
+        // float alpha = rotAngle.z;
+        // float beta = rotAngle.y;
+        // float gamma = rotAngle.x;
+        //
+        // float cx = cos(alpha), sx = sin(alpha);
+        // float cy = cos(beta), sy = sin(beta);
+        // float cz = cos(gamma), sz = sin(gamma);
+        // rotationMatrix3D = {
+        //     // Row 0 (X axis in world after rotation)
+        //     cy * cz,
+        //     sx * sy * cz - cx * sz,
+        //     cx * sy * cz + sx * sz,
+        //
+        //     // Row 1 (Y axis)
+        //     cy * sz,
+        //     sx * sy * sz + cx * cz,
+        //     cx * sy * sz - sx * cz,
+        //
+        //     // Row 2 (Z axis)
+        //     -sy,
+        //     sx * cy,
+        //     cx * cy
+        // };
     };
 
     ///Pointer to object's mesh
     Mesh *mesh;
-    
+
     ///Objects world position
     Vector Position;
 
     ///Objects rotation matrix
-    Matrix3D rotationMatrix3D{};
+    float alpha, beta, gamma;
 };
 
 
