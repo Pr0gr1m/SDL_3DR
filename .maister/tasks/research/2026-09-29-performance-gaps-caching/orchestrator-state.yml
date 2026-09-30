@@ -1,0 +1,71 @@
+orchestrator:
+  started_phase: phase-6
+  completed_phases: [phase-1, phase-2, phase-3, phase-4, phase-5, phase-6]
+  failed_phases: []
+  auto_fix_attempts: {}
+  options:
+    sequential: null
+    html_output: true
+    mockup_format: html
+    brainstorming_enabled: true
+    design_enabled: true
+  created: 2026-09-29T17:22:43Z
+  updated: 2026-09-29T17:52:36Z
+  task_path: .maister/tasks/research/2026-09-29-performance-gaps-caching
+  task_ids: {}
+task:
+  title: Performance gaps, especially caching
+  description: analyze performance gaps, especially related to caching
+  status: completed
+  tags: []
+  priority: null
+research_context:
+  research_type: technical
+  research_question: "What performance gaps exist in SDL_3DR, especially related to caching?"
+  scope:
+    included: [src/, shaders, CMake build config, git history]
+    excluded: [vcpkg submodule, code changes, runtime profiling]
+    constraints: [static analysis only]
+  methodology: [codebase analysis, git history review, build config review]
+  sources: [src/, CMakeLists.txt, build logs, git log]
+  confidence_level: medium
+  gathering_strategy:
+    categories: [chunk-mesh-caching, gpu-frame, culling-lod, worldgen-memory, math-ray, build-config]
+    count: 6
+    source: planner
+  project_doc_paths:
+    - .maister/docs/project/vision.md
+    - .maister/docs/project/roadmap.md
+    - .maister/docs/project/tech-stack.md
+    - .maister/docs/project/architecture.md
+  phase_summaries:
+    phase-1:
+      summary: "Only cache (per-chunk CPU Face list) is broken and shallow; full scene re-flattened and re-uploaded every frame; nothing profiled."
+      steps_completed: [initialize, plan, gather, synthesize]
+      artifacts:
+        - {path: outputs/research-report.md, label: Research report, html: outputs/research-report.html}
+        - {path: analysis/synthesis.md, label: Synthesis, html: null}
+    phase-2:
+      summary: "Brainstorming and design both enabled by user."
+    phase-3:
+      summary: "20 alternatives across 5 decision areas generated."
+      artifacts:
+        - {path: outputs/solution-exploration.md, label: Solution exploration, html: outputs/solution-exploration.html}
+    phase-4:
+      summary: "User converged on all 5 decision areas."
+      decision_areas:
+        - {area: "Measurement and build config", alternatives_count: 4, chosen_approach: "1B without build-config change (in-app per-stage timers, no Release preset)"}
+        - {area: "CPU chunk cache", alternatives_count: 4, chosen_approach: "2B dirty-flag chunk mesh"}
+        - {area: "GPU mesh ownership", alternatives_count: 4, chosen_approach: "3B per-chunk persistent GPU buffers"}
+        - {area: "Hidden-face culling", alternatives_count: 4, chosen_approach: "4B neighbor-aware cross-chunk culling"}
+        - {area: "Chunk data layout", alternatives_count: 4, chosen_approach: "5A keep optional<Object> for now"}
+      deferred_ideas: [real LOD with hysteresis, occlusion culling, texture atlas/mips, threaded gen/streaming, world-gen fixes, small recompute items, par_unseq/edit concurrency review, unrelated bugs, lighting/AO]
+    phase-5:
+      summary: "Dirty-flag per-chunk GPU mesh design, 5 ADRs, staged implementation order."
+      architecture_style: "Manager-based monolith with dirty-flag per-chunk GPU meshes"
+      decisions_count: 5
+      artifacts:
+        - {path: outputs/high-level-design.md, label: High-level design, html: outputs/high-level-design.html}
+        - {path: outputs/decision-log.md, label: Decision log, html: outputs/decision-log.html}
+    phase-6:
+      summary: "Research completed; all declared artifacts present on disk."

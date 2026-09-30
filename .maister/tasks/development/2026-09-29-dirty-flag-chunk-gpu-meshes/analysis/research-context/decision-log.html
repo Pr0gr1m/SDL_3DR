@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Decision Log — performance-gaps-caching</title>
+<style>:root{--bg:#f6f7f9;--surface:#fff;--border:#e2e5ea;--text:#1a1d23;--dim:#6b7280;--accent:#4f46e5;--accent-soft:#eef2ff;--ok:#16a34a;--ok-soft:#ecfdf3;--warn:#d97706;--warn-soft:#fffbeb;--crit:#dc2626;--crit-soft:#fef2f2;--info:#2563eb;--info-soft:#eff6ff;--radius:10px}
+@media (prefers-color-scheme:dark){:root{--bg:#111418;--surface:#1a1f26;--border:#2e3640;--text:#e6e9ee;--dim:#9aa4b2;--accent:#818cf8;--accent-soft:#26294a;--ok:#4ade80;--ok-soft:#11291a;--warn:#fbbf24;--warn-soft:#2e2410;--crit:#f87171;--crit-soft:#321616;--info:#60a5fa;--info-soft:#15233a}}
+*{box-sizing:border-box}body{margin:0 auto;max-width:1100px;padding:24px 20px 64px;background:var(--bg);color:var(--text);font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}h1{font-size:22px;letter-spacing:-.01em}h2{font-size:16px;margin-top:28px}h3{font-size:14px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin:14px 0}
+.badge{display:inline-block;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;padding:2px 8px;border-radius:99px;background:var(--accent-soft);color:var(--accent)}
+table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--dim)}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:var(--accent-soft);padding:1px 5px;border-radius:4px}
+pre{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px;overflow:auto;font-size:12px}pre code{background:none;padding:0}
+details>summary{cursor:pointer;font-weight:600}
+.crumbs{display:flex;gap:14px;font-size:13px;margin-bottom:18px;flex-wrap:wrap}.crumbs a.md{margin-left:auto;color:var(--dim)}.crumbs .here{font-weight:650;color:var(--text)}
+.tiles{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0}.tile{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;text-align:center;min-width:90px}
+.tile b{display:block;font-size:20px;letter-spacing:-.01em}.tile span{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.tldr{background:var(--accent-soft);border:1px solid var(--border);border-radius:var(--radius);padding:4px 18px 10px}
+.st{background:var(--ok-soft);color:var(--ok)}</style></head><body>
+<nav class="crumbs"><a href="../dashboard.html">← Dashboard</a><a href="research-report.html">Report</a><a href="solution-exploration.html">Exploration</a><a href="high-level-design.html">Design</a><span class="here">Decision Log</span><a href="decision-log.md" target="_blank" rel="noopener" class="md">md twin ↗</a></nav>
+<header><h1>Decision Log</h1><span class="badge">decision log</span> · generated 2026-09-29 · <a href="decision-log.md" target="_blank" rel="noopener">md twin</a></header>
+<div class="tiles"><div class="tile"><b>5</b><span>ADRs</span></div><div class="tile"><b>5</b><span>accepted</span></div><div class="tile"><b>0</b><span>superseded</span></div></div>
+<section class="tldr"><h2>TL;DR</h2><ul>
+<li>5 ADRs, one per decision area, all Accepted; alternatives in <a href="solution-exploration.html">solution exploration</a>.</li>
+<li>Most consequential: ADR-002 (dirty flag replaces Face cache) and ADR-003 (per-chunk persistent GPU buffers).</li>
+<li>ADR-001 accepts relative-only timings if Debug; ADR-005 defers block-layout work.</li>
+<li>All decisions stay dependency-free (SDL3 + standard library).</li></ul>
+<h2>Key Decisions</h2><ul>
+<li><a href="#adr-001">ADR-001</a>: in-app timers + benchmark path, no CMake/preset change.</li>
+<li><a href="#adr-002">ADR-002</a>: dirty flag replaces the Face cache.</li>
+<li><a href="#adr-003">ADR-003</a>: per-chunk persistent GPU buffers, pooled transfer, regrow policy.</li>
+<li><a href="#adr-004">ADR-004</a>: neighbor-aware cross-chunk culling, chunk-local vertices, stated boundary policy.</li>
+<li><a href="#adr-005">ADR-005</a>: keep <code>std::optional&lt;Object&gt;</code> for now.</li></ul>
+<h2>Open Questions / Risks</h2><ul>
+<li>Debug-build timings are relative-only (ADR-001).</li>
+<li>Deferred GPU buffer release and edit-vs-parallel-meshing thread safety unverified (ADR-002, ADR-003).</li>
+<li>Unloaded-neighbor boundary policy to be chosen at specification (ADR-004).</li></ul></section>
+<main>
+<div class="card" id="adr-001"><h2 style="margin-top:0">ADR-001: In-app per-stage timers and benchmark path without build-config change <span class="badge st">Accepted</span></h2>
+<p><b>Context.</b> Nothing has been profiled; Debug artifacts likely inflate copy/STL costs. The user chose no build-config change and no new dependencies. (<a href="solution-exploration.html">alternatives</a>)</p>
+<p><b>Decision drivers.</b> Each change justified by data; dependency-free; roadmap profiling item; learning value; no CMake/preset changes.</p>
+<p><b>Considered options.</b> 1A Release preset + existing timers; 1B in-app per-stage timers; 1C external profiler; 1D no measurement.</p>
+<p><b>Decision outcome.</b> <b>1B without the Release preset</b>: repeatable avg/p95/max per stage with a fixed benchmark camera path. Timings are relative-only if the build is Debug.</p>
+<p><b>Good.</b> Repeatable before/after comparison; permanent cheap instrumentation.</p>
+<p><b>Bad.</b> Debug timings may misrank stages; CPU-only (no GPU time); timers perturb tiny stages.</p></div>
+<div class="card" id="adr-002"><h2 style="margin-top:0">ADR-002: Replace the Face cache with a per-chunk dirty flag <span class="badge st">Accepted</span></h2>
+<p><b>Context.</b> <code>Chunk::cache</code> holds CPU world-space Faces, is inverted (App.cpp:1418), never invalidated and camera-dependent; frames still copy, flatten, regenerate and upload. The cache is in the wrong layer. (<a href="solution-exploration.html">alternatives</a>)</p>
+<p><b>Decision drivers.</b> Correctness by construction; alignment with GPU ownership; less code; blocks change rarely.</p>
+<p><b>Considered options.</b> 2A in-place fix; 2B dirty-flag chunk mesh; 2C no caching; 2D versioned multi-LOD cache.</p>
+<p><b>Decision outcome.</b> <b>2B</b>: <code>meshDirty</code> plus chunk-level frustum culling; remove <code>isValidCache</code>, <code>cachedBlockPresence</code>, per-block frustum test. The 2A correctness subset is an optional stopgap only if later stages are delayed.</p>
+<p><b>Good.</b> Removes stale/camera-dependent bugs; net code reduction; edits touch one chunk plus boundary neighbors.</p>
+<p><b>Bad.</b> Touches edit path and OnRender together; full payoff only with ADR-003; dirty-flag safety versus parallel meshing unverified.</p></div>
+<div class="card" id="adr-003"><h2 style="margin-top:0">ADR-003: Per-chunk persistent GPU vertex buffers <span class="badge st">Accepted</span></h2>
+<p><b>Context.</b> Every frame builds one merged vertex array and uploads it via a new transfer buffer into a buffer sized once (overflow risk; resize path dead since <code>canCreateVertexBufferEveryFrame=false</code>). (<a href="solution-exploration.html">alternatives</a>)</p>
+<p><b>Decision drivers.</b> Zero work for static chunks; camera motion must not rebuild; fix overflow risk; simplicity at 4 chunks.</p>
+<p><b>Considered options.</b> 3A shared buffer upload-when-dirty; 3B per-chunk persistent buffers; 3C indirect/multi-draw; 3D sub-allocator.</p>
+<p><b>Decision outcome.</b> <b>3B</b> with pooled transfer buffer and capacity + regrow policy (geometric growth from actual vertex counts, deferred release of replaced buffers, release on unload).</p>
+<p><b>Good.</b> Zero upload on clean frames; edits upload one chunk; covers overflow and transfer-buffer churn.</p>
+<p><b>Bad.</b> N draw calls; buffer lifetime bookkeeping; per-chunk offset needed for chunk-local vertices; magnitude unmeasured.</p></div>
+<div class="card" id="adr-004"><h2 style="margin-top:0">ADR-004: Neighbor-aware cross-chunk face culling <span class="badge st">Accepted</span></h2>
+<p><b>Context.</b> Every block emits 12 faces; <code>chunkFaceCulling</code> is false and z-neighbor guards use x (App.cpp:1467, 1473). Terrain is shallow, so savings are density-dependent. (<a href="solution-exploration.html">alternatives</a>)</p>
+<p><b>Decision drivers.</b> Largest geometry cut for modest machinery; smaller meshes cut uploads; border correctness.</p>
+<p><b>Considered options.</b> 4A in-chunk only; 4B neighbor-aware; 4C greedy meshing; 4D indexed/compact vertices.</p>
+<p><b>Decision outcome.</b> <b>4B</b>: fix z-guard typos first, chunk-local vertices, neighbors via ChunkManager, neighbor dirtying on boundary edits. Unloaded-neighbor policy must be stated in the spec; recommended default is air so world-edge faces stay visible.</p>
+<p><b>Good.</b> Removes interior hidden faces including at borders; correct by construction with neighbor dirtying.</p>
+<p><b>Bad.</b> Cross-chunk coupling; boundary policy affects world-edge visuals; greedy/indexed deferred.</p></div>
+<div class="card" id="adr-005"><h2 style="margin-top:0">ADR-005: Keep <code>std::optional&lt;Object&gt;</code> block storage for now <span class="badge st">Accepted</span></h2>
+<p><b>Context.</b> Per-block optionals (~160 KiB per chunk by estimate) give poor locality, but no evidence memory or generation time limits at 4 chunks. (<a href="solution-exploration.html">alternatives</a>)</p>
+<p><b>Decision drivers.</b> Avoid broad refactor for small payoff; low risk with zero tests; keep option open.</p>
+<p><b>Considered options.</b> 5A keep; 5B compact ids; 5C hybrid; 5D RLE/octree.</p>
+<p><b>Decision outcome.</b> <b>5A</b>. Revisit 5B when measured chunk memory or worldgen time matters, mesher neighbor lookups show in profiles, or streaming starts.</p>
+<p><b>Good.</b> Zero risk and effort now; narrow block-access interface eases a later swap.</p>
+<p><b>Bad.</b> Continued bloat and poor locality; slower neighbor checks than compact ids.</p></div>
+</main></body></html>

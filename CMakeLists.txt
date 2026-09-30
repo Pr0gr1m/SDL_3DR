@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 23)
 add_executable(${PROJECT_NAME} src/main.cpp
         src/App.cpp
         src/App.h
+        src/ChunkMeshStore.cpp
+        src/ChunkMeshStore.h
+        src/FrameProfiler.cpp
+        src/FrameProfiler.h
         src/core/Object.h
         src/core/Vector.h
         src/core/Mesh.h
@@ -23,13 +27,14 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/core/noise/SimplexNoise.h
         src/core/Ray.h
         src/core/ChunkManager.h
+        src/core/ChunkMesher.cpp
+        src/core/ChunkMesher.h
         src/core/TextureManager.cpp
         src/core/TextureManager.h
         src/core/ShaderHelper.h
         src/core/Face.cpp
         src/core/Face.h
         src/GlobalVariables.h
-        src/core/ChunkCache.h
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Specification — Dirty-Flag Per-Chunk GPU Meshes</title>
+<style>
+:root {
+  --bg:#f6f7f9; --surface:#fff; --border:#e2e5ea; --text:#1a1d23; --dim:#6b7280;
+  --accent:#4f46e5; --accent-soft:#eef2ff; --ok:#16a34a; --ok-soft:#ecfdf3;
+  --warn:#d97706; --warn-soft:#fffbeb; --crit:#dc2626; --crit-soft:#fef2f2;
+  --info:#2563eb; --info-soft:#eff6ff; --radius:10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg:#111418; --surface:#1a1f26; --border:#2e3640; --text:#e6e9ee; --dim:#9aa4b2;
+    --accent:#818cf8; --accent-soft:#26294a; --ok:#4ade80; --ok-soft:#11291a;
+    --warn:#fbbf24; --warn-soft:#2e2410; --crit:#f87171; --crit-soft:#321616;
+    --info:#60a5fa; --info-soft:#15233a; }
+}
+* { box-sizing:border-box; }
+body { margin:0 auto; max-width:1100px; padding:24px 20px 64px; background:var(--bg);
+  color:var(--text); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+h1 { font-size:22px; letter-spacing:-.01em; } h2 { font-size:16px; margin-top:28px; }
+.card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; margin:14px 0; }
+.badge { display:inline-block; font-size:11px; font-weight:600; text-transform:uppercase;
+  letter-spacing:.04em; padding:2px 8px; border-radius:99px; background:var(--accent-soft); color:var(--accent); }
+.sev { display:inline-block; font-size:10.5px; font-weight:700; text-transform:uppercase;
+  padding:1.5px 7px; border-radius:99px; margin-right:6px; }
+.sev.critical { background:var(--crit-soft); color:var(--crit); }
+.sev.warning  { background:var(--warn-soft); color:var(--warn); }
+.sev.info     { background:var(--info-soft); color:var(--info); }
+.pass { color:var(--ok); font-weight:600; } .fail { color:var(--crit); font-weight:600; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:7px 10px; border-bottom:1px solid var(--border); vertical-align:top; }
+th { font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--dim); }
+code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12.5px;
+  background:var(--accent-soft); padding:1px 5px; border-radius:4px; }
+img.shot { max-width:100%; border:1px solid var(--border); border-radius:var(--radius); }
+details > summary { cursor:pointer; font-weight:600; }
+.crumbs { display:flex; gap:14px; font-size:13px; margin-bottom:18px; flex-wrap:wrap; }
+.crumbs a.md { margin-left:auto; color:var(--dim); }
+.crumbs .here { font-weight:650; color:var(--text); }
+.tiles { display:flex; gap:10px; flex-wrap:wrap; margin:14px 0; }
+.tile { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:10px 16px; text-align:center; min-width:90px; }
+.tile b { display:block; font-size:20px; letter-spacing:-.01em; }
+.tile span { font-size:10.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
+.tldr { border-left:4px solid var(--accent); }
+.cols { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:760px) { .cols { grid-template-columns:1fr; } }
+.stage { border-left:4px solid var(--info); }
+</style>
+</head>
+<body>
+<nav class="crumbs">
+  <a href="../dashboard.html">← Dashboard</a>
+  <span class="here">Spec</span>
+  <a href="implementation-plan.html">Plan</a>
+  <a href="../verification/implementation-verification.html">Verification</a>
+  <a href="spec.md" target="_blank" rel="noopener" class="md">md twin ↗</a>
+</nav>
+
+<header>
+  <h1>Specification: Dirty-Flag Per-Chunk GPU Meshes (SDL_3DR) <span class="badge">spec</span></h1>
+  <div style="color:var(--dim)">Generated 2026-09-29 · <a href="spec.md" target="_blank" rel="noopener">spec.md</a></div>
+</header>
+
+<div class="tiles">
+  <div class="tile"><b>18</b><span>requirements</span></div>
+  <div class="tile"><b>13 / 4</b><span>reused / new components</span></div>
+  <div class="tile"><b>5</b><span>verified stages</span></div>
+  <div class="tile"><b>Medium</b><span>risk level</span></div>
+</div>
+
+<section class="tldr card">
+  <h2 style="margin-top:0">TL;DR</h2>
+  <ul>
+    <li>Replace the per-frame full-scene mesh/flatten/upload (<code>App::OnRender</code>, App.cpp:1311-1758) and the broken <code>ChunkMeshCache</code> with per-chunk <code>meshDirty</code> meshes in persistent per-chunk <code>SDL_GPUBuffer</code>s, one draw per visible chunk with a chunk offset in the vertex uniform.</li>
+    <li>Mesher emits chunk-local <code>Vertex3D</code> for exposed faces only; unloaded neighbors solid on X/Z, air on ±Y. Edits go through new <code>ChunkManager::setBlock</code>/<code>removeBlock</code>, dirtying the chunk and boundary neighbors.</li>
+    <li>Stages: (1) worldgen fix + <code>FrameProfiler</code> + benchmark path + baseline, (2) dirty flag + mesher, (3) GPU store + shader/spv rebuild, (4) neighbor culling, (5) delete cache/LOD.</li>
+    <li>Developer-facing only: key <code>B</code> toggles a benchmark orbit, <code>SDL_Log</code> reports avg/p95/max. No tests, no build-config change.</li>
+  </ul>
+  <h2>Key Decisions</h2>
+  <table>
+    <tr><th>Decision</th><th>Rationale</th></tr>
+    <tr><td>Dirty-flag per-chunk GPU meshes, keep <code>optional&lt;Object&gt;</code></td><td>Research ADR-001..005, binding</td></tr>
+    <tr><td>Unloaded neighbor: solid X/Z, air ±Y</td><td>All-6-sides solid would delete terrain top/bottom faces</td></tr>
+    <tr><td>GPU handles in App-owned <code>ChunkMeshStore</code> keyed by <code>Int3</code></td><td><code>Chunk</code> is copied (App.cpp:1214) and moved on reallocation</td></tr>
+    <tr><td>Mutation only via <code>setBlock</code>/<code>removeBlock</code>; non-const <code>tryGet</code>/<code>operator[]</code> deleted</td><td>No way to bypass dirty marking</td></tr>
+    <tr><td>All dirty chunks remeshed each frame, single-threaded, before render pass</td><td>Camera motion never triggers remesh or upload</td></tr>
+    <tr><td>World-space <code>Face</code> then rebase to chunk-local; <code>Face.cpp</code> unchanged</td><td>UVs and lighting match baseline</td></tr>
+    <tr><td>Uniform <code>{mat4; vec4 chunkOffset}</code>, 1 uniform buffer, rebuild <code>vertex.spv</code></td><td>No pipeline layout change</td></tr>
+    <tr><td>No custom deferred-release queue</td><td>SDL defers buffer release until in-flight work finishes</td></tr>
+    <tr><td>Profiler via <code>SDL_GetPerformanceCounter</code> + unconditional <code>SDL_Log</code></td><td><code>debugLevel=0</code> compiles <code>SLog1</code> out</td></tr>
+    <tr><td>Remove <code>totalFPS</code>/<code>numFPS</code>; Quit logs a profiler report</td><td>Uninitialised, div-by-zero; update lives in replaced code</td></tr>
+    <tr><td>Lazy chunk creation in <code>setBlock</code>; <code>removeBlock</code> never creates</td><td>Current E-key creation branch is unreachable</td></tr>
+  </table>
+  <h2>Open Questions / Risks</h2>
+  <p><span class="sev warning">warning</span>Debug-build timings are relative-only; compare within the same build config (printed in the report header).</p>
+  <p><span class="sev warning">warning</span>Outer X/Z world sides are not emitted (solid policy): world looks open from outside (user-accepted).</p>
+  <p><span class="sev warning">warning</span>Baseline geometry is unreliable (frozen frustum cache); the reference is the benchmark start pose, constrained to see all four chunks fully.</p>
+  <p><span class="sev info">info</span><code>setBlock</code> has no runtime caller (add path stays commented out); kept because the requirements mandate the pair. Drop if reviewed as dead code.</p>
+  <p><span class="sev info">info</span>Latent worldgen defects left alone: stale <code>currentlyWorkingChunk</code>, <code>Object.Position</code> y doubling below y=0, noise ignoring chunk offset (identical terrain per column).</p>
+  <p><span class="sev info">info</span><code>static_assert(sizeof(Vertex3D)==60)</code> assumes <code>Vector</code> is three packed floats; verify before relying on it.</p>
+  <p><span class="sev info">info</span>Zero-vertex line pass draw is dropped with the replaced draw block; line pipeline creation/release untouched.</p>
+</section>
+
+<nav class="toc">Contents: <a href="#scope">Scope</a> · <a href="#requirements">Requirements</a> · <a href="#stories">User Stories</a> · <a href="#reuse">Reuse</a> · <a href="#stages">Stages</a> · <a href="#integration">Integration</a> · <a href="#success">Success</a></nav>
+
+<main>
+<section id="scope">
+  <h2>Scope: in / out</h2>
+  <div class="cols">
+    <div class="card"><b class="pass">In scope</b>
+      <ul>
+        <li>FrameProfiler, benchmark camera path (key <code>B</code>), FPS bookkeeping fix</li>
+        <li>Worldgen z fix, exclusive <code>PositionInBounds</code></li>
+        <li><code>meshDirty</code>, <code>ChunkManager</code> edit and neighbor API, mesher</li>
+        <li>Per-chunk GPU buffers, pooled transfer buffer, regrow</li>
+        <li>Shader offset uniform, <code>vertex.spv</code> rebuild</li>
+        <li>Neighbor-aware culling, chunk AABB -0.5 fix</li>
+        <li>Deleting cache, LOD, par loops, dead lambdas</li>
+      </ul></div>
+    <div class="card"><b class="fail">Out of scope</b>
+      <ul>
+        <li>Build presets/LTO, external profilers, on-screen stats</li>
+        <li>Greedy meshing, indexed vertices, indirect draw, atlas/mips, compact block ids</li>
+        <li>Real LOD, occlusion culling, streaming, threaded gen/remesh</li>
+        <li>Noise offset fix, latent worldgen defects, empty line pass, other unrelated bugs</li>
+        <li>Cleanup beyond replaced code + dead lambdas (App.cpp:1334-1353)</li>
+        <li>Tests or test framework; present-mode forcing; viewport resize</li>
+      </ul></div>
+  </div>
+</section>
+
+<section id="requirements">
+  <h2>Requirements</h2>
+  <table>
+    <tr><th>#</th><th>Requirement</th><th>Priority</th></tr>
+    <tr><td>1</td><td>FrameProfiler: stages Frame/Build/Upload/Acquire/Record/Submit, counters, report every 600 frames (avg/p95/max), header with present mode, build info, chunk counts</td><td>Must</td></tr>
+    <tr><td>2</td><td>Benchmark path: key <code>B</code> toggle, frame-counter driven hold + orbit, bypasses gravity/input, restore on toggle-off; start pose sees all 4 chunks</td><td>Must</td></tr>
+    <tr><td>3</td><td>Remove <code>totalFPS</code>/<code>numFPS</code>; Quit logs profiler report</td><td>Should</td></tr>
+    <tr><td>4</td><td>Worldgen fix: <code>atPos.z</code> at App.cpp:1192; exclusive <code>PositionInBounds</code></td><td>Must</td></tr>
+    <tr><td>5</td><td><code>Chunk::meshDirty</code>, <code>tryInsert</code>/<code>tryRemove</code> mark dirty, remove cache and non-const accessors</td><td>Must</td></tr>
+    <tr><td>6</td><td>ChunkManager: <code>findChunk</code>, moved coordinate helpers, <code>setBlock</code>/<code>removeBlock</code>, boundary and creation neighbor dirtying</td><td>Must</td></tr>
+    <tr><td>7</td><td>E-key routed through <code>removeBlock</code></td><td>Must</td></tr>
+    <tr><td>8</td><td>Pure mesher: chunk-local vertices, existing face order/winding, world-position UVs via <code>Face</code></td><td>Must</td></tr>
+    <tr><td>9</td><td>Neighbor-aware culling; unloaded solid X/Z, air ±Y</td><td>Must</td></tr>
+    <tr><td>10</td><td><code>ChunkMeshStore</code>: per-chunk persistent buffers, pow2 capacity, regrow, pooled transfer buffer, one copy pass, <code>ReleaseAll</code></td><td>Must</td></tr>
+    <tr><td>11</td><td>Shader <code>chunkOffset</code> uniform, 80 B struct, <code>vertex.spv</code> rebuilt and committed</td><td>Must</td></tr>
+    <tr><td>12</td><td>Per-chunk draw with AABB [pos-0.5, pos+N-0.5] frustum test</td><td>Must</td></tr>
+    <tr><td>13</td><td>Remesh all dirty chunks single-threaded before render pass</td><td>Must</td></tr>
+    <tr><td>14</td><td>Delete ChunkCache/LOD/par loops/scene buffer/dead lambdas and now-unused members</td><td>Must</td></tr>
+    <tr><td>15</td><td><code>static_assert</code> on <code>sizeof(Vertex3D)</code></td><td>Should</td></tr>
+    <tr><td>16</td><td>CMake source-list edits only</td><td>Must</td></tr>
+    <tr><td>17</td><td>Existing error pattern (log, release, submit command buffer, FAILURE)</td><td>Must</td></tr>
+    <tr><td>18</td><td>Naming: lowerCamel in Chunk/ChunkManager/mesher, PascalCase in App/FrameProfiler/ChunkMeshStore</td><td>Must</td></tr>
+  </table>
+</section>
+
+<section id="stories">
+  <h2>User Stories</h2>
+  <div class="card"><b>Developer, benchmark</b><br>As the developer, I want to press a key and get a deterministic camera orbit with a timing report in the log, so that I can compare frame cost before and after each stage.</div>
+  <div class="card"><b>Developer, edits</b><br>As the developer, I want block edits to remesh only the affected chunk (and boundary neighbor), so that editing does not slow the frame.</div>
+  <div class="card"><b>Player, visuals</b><br>As the player/developer, I want gameplay and visuals unchanged (except the open outer X/Z world sides), so that the optimization is invisible.</div>
+</section>
+
+<section id="reuse">
+  <h2>Reusable vs new components</h2>
+  <table>
+    <tr><th>Existing code</th><th>Use</th></tr>
+    <tr><td><code>App.cpp:1515-1533</code></td><td>12-face corner layout and winding into the mesher</td></tr>
+    <tr><td><code>Face.h</code>, <code>Face.cpp:3-81</code></td><td><code>GetFaceDrawCallVerticies</code>, unchanged, then rebase <code>Position</code></td></tr>
+    <tr><td><code>App.cpp:1364-1380</code></td><td>Frustum AABB test, extracted with -0.5 offset</td></tr>
+    <tr><td><code>App.cpp:64-86</code></td><td>Chunk coordinate helpers moved to <code>ChunkManager</code></td></tr>
+    <tr><td><code>ChunkManager.h:38-41</code></td><td><code>worldChunks</code>, <code>chunkMap</code> for lookups</td></tr>
+    <tr><td><code>Chunk.h:34-46</code></td><td>Bounds, index, <code>tryInsert</code></td></tr>
+    <tr><td><code>App.cpp:1219-1305</code></td><td>Raycast unchanged, feeds <code>removeBlock</code></td></tr>
+    <tr><td><code>App.cpp:721-783</code></td><td>Quit release ordering</td></tr>
+    <tr><td>Early-return-submit patterns, upload usage</td><td>Store error paths</td></tr>
+    <tr><td><code>App.cpp:233-239</code></td><td>Present-mode logic, name for profiler header</td></tr>
+    <tr><td><code>Camera</code>, <code>Int3</code>, <code>GlobalVariables.h</code></td><td>Benchmark pose, map key, constants and logging</td></tr>
+    <tr><td>glslang CMake command, REPEAT sampler</td><td>Shader rebuild, UV safety net</td></tr>
+  </table>
+  <table style="margin-top:14px">
+    <tr><th>New component</th><th>Files</th><th>Why new</th></tr>
+    <tr><td>FrameProfiler</td><td><code>src/FrameProfiler.h/.cpp</code></td><td>No timing exists; SDL-facing, so outside SDL-free <code>core/</code></td></tr>
+    <tr><td>ChunkMesher</td><td><code>src/core/ChunkMesher.h/.cpp</code></td><td>Meshing is inline in a lambda mixed with culling/LOD/cache</td></tr>
+    <tr><td>ChunkMeshStore</td><td><code>src/ChunkMeshStore.h/.cpp</code></td><td>Nothing owns per-chunk GPU handles; cannot live in <code>Chunk</code></td></tr>
+    <tr><td>ChunkManager methods</td><td><code>ChunkManager.h</code> (inline)</td><td>No neighbor lookup or dirty marking exists</td></tr>
+  </table>
+</section>
+
+<section id="stages">
+  <h2>Staged implementation and verification</h2>
+  <p>No automated tests; each stage has manual, run-based checks. Compare under the same build config and present mode; discard the first window after app start.</p>
+  <div class="card stage"><b>Stage 1 · Worldgen fix, FrameProfiler, benchmark, baseline</b>
+    <ul><li>Header: <code>worldChunks.size() == chunkMap.size()</code>, 4 distinct positions</li>
+    <li>Two runs agree on avg Frame within about 5%; stage times sum to about Frame</li>
+    <li>Toggle on/off restores camera, no drift; mouse ignored while active</li>
+    <li>Baseline numbers and hold-pose screenshot recorded in the work-log</li>
+    <li>Quit with zero frames does not divide by zero</li></ul></div>
+  <div class="card stage"><b>Stage 2 · <code>meshDirty</code>, neighbor helper, mesher (all faces)</b>
+    <ul><li>Hold-pose image identical to baseline</li>
+    <li>Static window: remeshed 0, uploaded 0, Build about 0; camera motion does not remesh</li>
+    <li><code>E</code> interior block: remeshed 1; at a chunk boundary: remeshed 2; repeat on removed block: no crash</li></ul></div>
+  <div class="card stage"><b>Stage 3 · GPU store, shader/spv rebuild, chunk-offset draws</b>
+    <ul><li>Image identical; clean frames create no copy pass, upload bytes 0</li>
+    <li>Orbit shows no chunk popping (AABB offset correct); empty chunks not drawn</li>
+    <li>Growth test with temporary exact-fit capacity and device debug: no overflow or validation error (reverted after)</li>
+    <li><code>vertex.spv</code> confirmed regenerated; Quit releases cleanly</li></ul></div>
+  <div class="card stage"><b>Stage 4 · Neighbor-aware culling</b>
+    <ul><li>Vertices-drawn average strictly lower than stage 3 (roughly 60-80% expected)</li>
+    <li>No holes at chunk seams; differences vs stage 3 only at outer X/Z sides from outside</li>
+    <li>Border edit: both chunks remesh (2), faces revealed on both sides; interior-surrounded edit exercises growth</li>
+    <li>Terrain tops and bottoms at y=-0.5 still render (±Y air)</li></ul></div>
+  <div class="card stage"><b>Stage 5 · Delete cache and LOD</b>
+    <ul><li>Builds clean; grep finds no <code>ChunkMeshCache</code>, <code>LODDBLock</code>, <code>GetLevelOfDetailFromDistance</code>, <code>std::execution</code>, <code>chunkFaceCulling</code></li>
+    <li><code>ChunkCache.h</code> gone from CMake; final benchmark and screenshot match stage 4; no stray logs committed</li></ul></div>
+  <details><summary>Testing approach and standards compliance</summary>
+    <p>No test framework or build-config change by user decision. Each stage has 2-8 focused manual checks. The pure <code>ChunkMesher</code> is the seam if tests are added later (2-8 tests per step group).</p>
+    <p>Standards followed: global coding-style, minimal-implementation, commenting, error-handling, conventions; testing/test-writing recorded as a documented deviation. Architecture and roadmap docs updated in the documentation phase.</p>
+  </details>
+</section>
+
+<section id="integration">
+  <h2>Integration points</h2>
+  <details open><summary>File and line references (pre-change numbering)</summary>
+  <table>
+    <tr><th>File:lines</th><th>Change</th></tr>
+    <tr><td><code>App.cpp:41-42, 47</code></td><td>Delete <code>chunkFaceCulling</code>, <code>canCreateVertexBufferEveryFrame</code>, <code>halfChunk</code> (stage 5)</td></tr>
+    <tr><td><code>App.cpp:64-86</code></td><td>Move chunk-coordinate helpers to <code>ChunkManager</code></td></tr>
+    <tr><td><code>App.cpp:233-239, 264</code></td><td>Keep present mode (retain name); <code>num_uniform_buffers = 1</code> unchanged</td></tr>
+    <tr><td><code>App.cpp:516-524</code></td><td>Create store; log chunk counts in header</td></tr>
+    <tr><td><code>App.cpp:547-561</code></td><td><code>Iterate</code>: profiler Begin/EndFrame; skip movement when benchmarking</td></tr>
+    <tr><td><code>App.cpp:572-660</code></td><td>Add <code>SDLK_B</code> toggle; E-key body becomes <code>removeBlock</code></td></tr>
+    <tr><td><code>App.cpp:706-711</code></td><td>Ignore mouse motion while benchmarking</td></tr>
+    <tr><td><code>App.cpp:721-783</code></td><td>Quit: profiler report for 725; <code>ReleaseAll()</code> for 732-734</td></tr>
+    <tr><td><code>App.cpp:1087-1118</code></td><td><code>OnUpdate</code>: early return with frame-counter pose when benchmarking</td></tr>
+    <tr><td><code>App.cpp:1192</code></td><td><code>atPos.y</code> to <code>atPos.z</code></td></tr>
+    <tr><td><code>App.cpp:1311-1758</code></td><td><code>OnRender</code> rewritten; 1334-1353, 1363-1558, 1566-1682 removed; 1721-1750 per-chunk draws</td></tr>
+    <tr><td><code>App.h:54, 96-113, 127-148</code></td><td>Add profiler/store/benchmark members; remove scene buffer, FPS members, LOD helper</td></tr>
+    <tr><td><code>Chunk.h:6, 25-26, 49-70, 77-81, 89-91</code></td><td>Cache and accessors removed; <code>meshDirty</code>, <code>tryRemove</code>; exclusive bounds</td></tr>
+    <tr><td><code>ChunkManager.h:20-35, 38-41</code></td><td>LOD constants removed; lookup/edit/neighbor API added</td></tr>
+    <tr><td><code>Vertex3D.h:11-19</code></td><td><code>static_assert</code> on size</td></tr>
+    <tr><td><code>vertex.glsl:63-65, 71-72</code>, <code>vertex.spv</code></td><td>UBO gains <code>chunkOffset</code>; spv regenerated and committed</td></tr>
+    <tr><td><code>CMakeLists.txt:6-33</code></td><td>Add new sources, remove <code>ChunkCache.h</code> (line 32)</td></tr>
+  </table></details>
+  <details><summary>Technical approach</summary>
+    <p>Worldgen or edit sets <code>meshDirty</code> (chunk plus boundary neighbors). Each frame every dirty chunk is remeshed into chunk-local <code>Vertex3D</code>, uploaded through one pooled transfer buffer in one copy pass into its persistent buffer, and drawn with a chunk offset uniform.</p>
+    <p><code>OnRender</code> order: acquire command buffer, frustum and view-projection, Build (remesh), Upload, Acquire swapchain, Record (bind once, per-chunk cull, push uniform, bind, draw), end pass, Submit. <code>setBlock</code> must not hold chunk references across <code>emplace_back</code>. Stage 2 uses a transitional per-chunk CPU cache flattened into the old scene buffer, removed in stage 3.</p>
+  </details>
+</section>
+
+<section id="success">
+  <h2>Success criteria</h2>
+  <ul>
+    <li>Clean frames: zero chunks remeshed, zero bytes uploaded; camera motion alone triggers none.</li>
+    <li>Edit remeshes only the edited chunk plus the boundary neighbor; no stale or missing geometry.</li>
+    <li>Hold-pose image identical to baseline after stages 2 and 3; after stage 4 differs only on the open outer X/Z sides.</li>
+    <li>Vertices-drawn average drops after stage 4 with no visible border holes.</li>
+    <li>Avg and p95 frame time improve versus the stage 1 baseline under the same build config and present mode.</li>
+    <li>No buffer overflow or validation error on growth; Quit releases all chunk buffers.</li>
+    <li>4 distinct chunks, <code>worldChunks.size() == chunkMap.size()</code>; no cache/LOD/<code>std::execution</code> code left; <code>vertex.spv</code> matches <code>vertex.glsl</code>.</li>
+  </ul>
+</section>
+</main>
+</body>
+</html>
