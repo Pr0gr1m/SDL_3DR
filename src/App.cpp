@@ -12,8 +12,10 @@
 #include <string>
 #include <limits>
 #include <list>
+#include <mutex>
 #include <optional>
 #include <ranges>
+#include <thread>
 #include <utility>
 
 #include "core/noise/SimplexNoise.h"
@@ -37,7 +39,6 @@ static SimplexNoise *noise;
 
 Vector startingCameraPos = Vector(0.f, 50.f, 0.f);
 Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
-std::unique_ptr<Camera> sceneCamera = nullptr;
 
 inline constexpr Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
 inline constexpr float cameraMinYPosition = -5;
@@ -49,154 +50,147 @@ inline constexpr int groundZeroYLevel = -2; //only 1 chunk for test
 //TODO: Optimize with diff. cullings
 //TODO: Add screen space GI?
 
-namespace {
-    void BuildCameraFromState() {
-        sceneCamera = std::make_unique<Camera>(startingCameraPos, degreesCameraEulerAngle.x, degreesCameraEulerAngle.y, degreesCameraEulerAngle.z, defaultAspectRatio);
-    }
+// namespace {
+void App::BuildCameraFromState() {
+    sceneCamera = std::make_unique<Camera>(startingCameraPos, degreesCameraEulerAngle.x, degreesCameraEulerAngle.y, degreesCameraEulerAngle.z, defaultAspectRatio);
+    cameraPositionSnapshot = sceneCamera->Position;
+}
 
-    Vector HorizontalDirection(Vector direction) {
-        direction.y = 0.f;
-        return direction.Normalized();
-    }
+Vector HorizontalDirection(Vector direction) {
+    direction.y = 0.f;
+    return direction.Normalized();
+}
 
-    inline constexpr Uint64 kBenchmarkHoldFrames = 300;
-    inline constexpr Uint64 kBenchmarkRevolutionFrames = 600;
-    inline constexpr Uint64 kBenchmarkLoopFrames = kBenchmarkHoldFrames + kBenchmarkRevolutionFrames;
-    inline constexpr float kBenchmarkOrbitRadius = 28.f;
-    inline constexpr float kBenchmarkCameraHeight = 30.f;
+inline constexpr Uint64 kBenchmarkHoldFrames = 300;
+inline constexpr Uint64 kBenchmarkRevolutionFrames = 600;
+inline constexpr Uint64 kBenchmarkLoopFrames = kBenchmarkHoldFrames + kBenchmarkRevolutionFrames;
+inline constexpr float kBenchmarkOrbitRadius = 28.f;
+inline constexpr float kBenchmarkCameraHeight = 30.f;
 
-    struct BenchmarkPose {
-        Vector position;
-        Vector lookDegrees;
+struct BenchmarkPose {
+    Vector position;
+    Vector lookDegrees;
+};
+
+//Orbit around the middle of the four starting chunks; holds still for the first frames of every loop
+BenchmarkPose BenchmarkPoseForFrame(const Uint64 frame) {
+    const Vector orbitCentre(15.5f, 3.f, 15.5f);
+    const Uint64 loopFrame = frame % kBenchmarkLoopFrames;
+    const float angle = loopFrame < kBenchmarkHoldFrames
+                            ? 0.f
+                            : 2.f * static_cast<float>(M_PI) * static_cast<float>(loopFrame - kBenchmarkHoldFrames) / static_cast<float>(kBenchmarkRevolutionFrames);
+
+    const Vector position(orbitCentre.x + kBenchmarkOrbitRadius * std::sin(angle), kBenchmarkCameraHeight, orbitCentre.z + kBenchmarkOrbitRadius * std::cos(angle));
+    const Vector direction = (orbitCentre - position).Normalized();
+
+    //Inverse of the forward vector in Camera::UpdateDirectionVectors
+    const float pitchDegrees = std::asin(direction.y) / DEG_2_RAD;
+    const float yawDegrees = std::atan2(direction.x, -direction.z) / DEG_2_RAD;
+    return {position, Vector(pitchDegrees, yawDegrees, 0.f)};
+}
+
+//Must match the Uniforms block in vertex.glsl (std140: mat4 followed by vec4)
+struct ChunkUniforms {
+    float viewProjection[16];
+    float chunkOffset[4];
+};
+
+static_assert(sizeof(ChunkUniforms) == 80, "ChunkUniforms must match the vertex shader uniform block");
+
+//Blocks are centred on integer coordinates, so a chunk spans [atPosition - 0.5, atPosition + chunkSize - 0.5] on every axis
+bool IsChunkInFrustum(const Camera &camera, const Int3 &chunkLookup) {
+    const float minCorner[3] = {
+        static_cast<float>(chunkLookup.a) - kBlockHalfExtent,
+        static_cast<float>(chunkLookup.b) - kBlockHalfExtent,
+        static_cast<float>(chunkLookup.c) - kBlockHalfExtent
     };
+    constexpr float chunkExtent = static_cast<float>(ChunkManager::chunkSizeXYZ);
 
-    //Orbit around the middle of the four starting chunks; holds still for the first frames of every loop
-    BenchmarkPose BenchmarkPoseForFrame(const Uint64 frame) {
-        const Vector orbitCentre(15.5f, 3.f, 15.5f);
-        const Uint64 loopFrame = frame % kBenchmarkLoopFrames;
-        const float angle = loopFrame < kBenchmarkHoldFrames
-                                ? 0.f
-                                : 2.f * static_cast<float>(M_PI) * static_cast<float>(loopFrame - kBenchmarkHoldFrames) / static_cast<float>(kBenchmarkRevolutionFrames);
-
-        const Vector position(orbitCentre.x + kBenchmarkOrbitRadius * std::sin(angle), kBenchmarkCameraHeight, orbitCentre.z + kBenchmarkOrbitRadius * std::cos(angle));
-        const Vector direction = (orbitCentre - position).Normalized();
-
-        //Inverse of the forward vector in Camera::UpdateDirectionVectors
-        const float pitchDegrees = std::asin(direction.y) / DEG_2_RAD;
-        const float yawDegrees = std::atan2(direction.x, -direction.z) / DEG_2_RAD;
-        return {position, Vector(pitchDegrees, yawDegrees, 0.f)};
+    for (const auto &plane: camera.frustrumPlanes) {
+        //Corner furthest along the plane normal, if even that one is behind the plane the box is outside
+        const float x = plane.A >= 0.f ? minCorner[0] + chunkExtent : minCorner[0];
+        const float y = plane.B >= 0.f ? minCorner[1] + chunkExtent : minCorner[1];
+        const float z = plane.C >= 0.f ? minCorner[2] + chunkExtent : minCorner[2];
+        if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0.f) return false;
     }
 
-    //Must match the Uniforms block in vertex.glsl (std140: mat4 followed by vec4)
-    struct ChunkUniforms {
-        float viewProjection[16];
-        float chunkOffset[4];
-    };
-
-    static_assert(sizeof(ChunkUniforms) == 80, "ChunkUniforms must match the vertex shader uniform block");
-
-    //Blocks are centred on integer coordinates, so a chunk spans [atPosition - 0.5, atPosition + chunkSize - 0.5] on every axis
-    bool IsChunkInFrustum(const Camera &camera, const Int3 &chunkLookup) {
-        const float minCorner[3] = {
-            static_cast<float>(chunkLookup.a) - kBlockHalfExtent,
-            static_cast<float>(chunkLookup.b) - kBlockHalfExtent,
-            static_cast<float>(chunkLookup.c) - kBlockHalfExtent
-        };
-        constexpr float chunkExtent = static_cast<float>(ChunkManager::chunkSizeXYZ);
-
-        for (const auto &plane: camera.frustrumPlanes) {
-            //Corner furthest along the plane normal, if even that one is behind the plane the box is outside
-            const float x = plane.A >= 0.f ? minCorner[0] + chunkExtent : minCorner[0];
-            const float y = plane.B >= 0.f ? minCorner[1] + chunkExtent : minCorner[1];
-            const float z = plane.C >= 0.f ? minCorner[2] + chunkExtent : minCorner[2];
-            if (plane.A * x + plane.B * y + plane.C * z + plane.D < 0.f) return false;
-        }
-
-        return true;
-    }
+    return true;
+}
 
 #ifdef __VERSION__
-    inline constexpr const char *kCompilerVersion = __VERSION__;
+inline constexpr const char *kCompilerVersion = __VERSION__;
 #else
-    inline constexpr const char *kCompilerVersion = "unknown";
+inline constexpr const char *kCompilerVersion = "unknown";
 #endif
 
 #ifdef NDEBUG
-    inline constexpr const char *kNdebugState = "defined";
+inline constexpr const char *kNdebugState = __DATE__; //"defined";
 #else
-    inline constexpr const char *kNdebugState = "not defined";
+inline constexpr const char *kNdebugState = "not defined";
 #endif
 
-    int BlockCoordinateFromPoint(const float point) {
-        return static_cast<int>(std::floor(point + kBlockHalfExtent));
-    }
+int BlockCoordinateFromPoint(const float point) {
+    return static_cast<int>(std::floor(point + kBlockHalfExtent));
+}
 
-    Vector BlockPositionFromPoint(const Vector &point) {
-        return Vector(
-            static_cast<float>(BlockCoordinateFromPoint(point.x)),
-            static_cast<float>(BlockCoordinateFromPoint(point.y)),
-            static_cast<float>(BlockCoordinateFromPoint(point.z))
-        );
-    }
+Vector BlockPositionFromPoint(const Vector &point) {
+    return Vector(
+        static_cast<float>(BlockCoordinateFromPoint(point.x)),
+        static_cast<float>(BlockCoordinateFromPoint(point.y)),
+        static_cast<float>(BlockCoordinateFromPoint(point.z))
+    );
+}
 
-    [[deprecated]] [[maybe_unused]] void MoveCameraLocal(const Vector &localDirection, const float distance) {
-        sceneCamera->UpdateDirectionVectors();
-        const Vector worldOffset =
-                (sceneCamera->right * localDirection.x) +
-                (sceneCamera->up * localDirection.y) +
-                (sceneCamera->forward * localDirection.z);
-        sceneCamera->Position += worldOffset * distance;
-    }
+void App::MoveCameraHorizontal(const Vector &localDirection, const float distance) {
+    sceneCamera->UpdateDirectionVectors();
+    const Vector worldOffset =
+            (HorizontalDirection(sceneCamera->right) * localDirection.x) +
+            (HorizontalDirection(sceneCamera->forward) * localDirection.z);
 
-    void MoveCameraHorizontal(const Vector &localDirection, const float distance) {
-        sceneCamera->UpdateDirectionVectors();
-        const Vector worldOffset =
-                (HorizontalDirection(sceneCamera->right) * localDirection.x) +
-                (HorizontalDirection(sceneCamera->forward) * localDirection.z);
-
-        if (worldOffset.Magnitude() > 0.f) {
-            sceneCamera->Position += worldOffset.Normalized() * distance;
-        }
-    }
-
-    void MoveCameraWithForce(const Vector &forceDir, const float mag) {
-        sceneCamera->AddForceThisTick(forceDir, mag);
-    }
-
-    void RotateCameraLocal(const Vector degreesCameraEulerAngle) {
-        sceneCamera->pitch = degreesCameraEulerAngle.x;
-        sceneCamera->yaw = degreesCameraEulerAngle.y;
-        sceneCamera->roll = degreesCameraEulerAngle.z;
-
-        sceneCamera->UpdateDirectionVectors();
-    }
-
-    void MoveCameraBasedOnStates() {
-        if (sceneCamera->GetMoveState(Camera::Forward)) {
-            MoveCameraHorizontal(Vector(0.f, 0.f, 1.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
-        }
-
-        if (sceneCamera->GetMoveState(Camera::Backward)) {
-            MoveCameraHorizontal(Vector(0.f, 0.f, -1.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
-        }
-
-        if (sceneCamera->GetMoveState(Camera::Left)) {
-            MoveCameraHorizontal(Vector(-1.f, 0.f, 0.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
-        }
-
-        if (sceneCamera->GetMoveState(Camera::Right)) {
-            MoveCameraHorizontal(Vector(1.f, 0.f, 0.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
-        }
-
-        if (sceneCamera->GetMoveState(Camera::Up)) {
-            MoveCameraWithForce(App::GetGravityVector().Normalized().Negated(), kJumpForceMagnitude);
-        }
-
-        if (sceneCamera->GetMoveState(Camera::Down)) {
-            MoveCameraWithForce(App::GetGravityVector().Normalized(), kJumpForceMagnitude);
-        }
+    if (worldOffset.Magnitude() > 0.f) {
+        sceneCamera->Position += worldOffset.Normalized() * distance;
     }
 }
+
+void App::MoveCameraWithForce(const Vector &forceDir, const float mag) {
+    sceneCamera->AddForceThisTick(forceDir, mag);
+}
+
+void App::RotateCameraLocal(const Vector degreesCameraEulerAngle) {
+    sceneCamera->pitch = degreesCameraEulerAngle.x;
+    sceneCamera->yaw = degreesCameraEulerAngle.y;
+    sceneCamera->roll = degreesCameraEulerAngle.z;
+
+    sceneCamera->UpdateDirectionVectors();
+}
+
+void App::MoveCameraBasedOnStates() {
+    if (sceneCamera->GetMoveState(Camera::Forward)) {
+        MoveCameraHorizontal(Vector(0.f, 0.f, 1.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
+    }
+
+    if (sceneCamera->GetMoveState(Camera::Backward)) {
+        MoveCameraHorizontal(Vector(0.f, 0.f, -1.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
+    }
+
+    if (sceneCamera->GetMoveState(Camera::Left)) {
+        MoveCameraHorizontal(Vector(-1.f, 0.f, 0.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
+    }
+
+    if (sceneCamera->GetMoveState(Camera::Right)) {
+        MoveCameraHorizontal(Vector(1.f, 0.f, 0.f), kMoveSpeed * (float) sceneCamera->deltaTimeMS / 1000.f);
+    }
+
+    if (sceneCamera->GetMoveState(Camera::Up)) {
+        MoveCameraWithForce(App::GetGravityVector().Normalized().Negated(), kJumpForceMagnitude);
+    }
+
+    if (sceneCamera->GetMoveState(Camera::Down)) {
+        MoveCameraWithForce(App::GetGravityVector().Normalized(), kJumpForceMagnitude);
+    }
+}
+
+// }
 
 App::App(int argc, char **argv) : m_Window(nullptr, &SDL_DestroyWindow), m_gpuDevice(nullptr, &SDL_DestroyGPUDevice) {
 }
@@ -574,13 +568,27 @@ SDL_AppResult App::Init() {
 
     noise = new SimplexNoise(0.15f, 3, 0, 0);
 
+    toBeConstructedChunkPositions.reserve(8);
+
+    //Construct default chunk
     ConstructChunkAtLine(Vector(0, 0, 0));
-    ConstructChunkAtLine(Vector(16, 0, 0));
-    ConstructChunkAtLine(Vector(0, 0, 16));
-    ConstructChunkAtLine(Vector(16, 0, 16));
-    //ConstructChunkAtLine(Vector(-16, 0, 0));
-    //ConstructChunkAtLine(Vector(0, 0, -16));
-    //ConstructChunkAtLine(Vector(-16, 0, -16));
+
+    chunkConstructionThread = std::jthread([this](std::stop_token st) {
+        int safetyLimit = 0;
+        while (!st.stop_requested()) {
+            if (safetyLimit >= 1000) break;
+            safetyLimit += 1;
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (st.stop_requested()) break;
+
+            const Int3 chunkLookup = ChunkManager::chunkLookupFromBlockPosition(cameraPositionSnapshot);
+
+            // std::scoped_lock lock(chunkQueueMutex);
+            toBeConstructedChunkPositions.push_back(chunkLookup + Int3(-ChunkManager::chunkSizeXYZ, 0, 0));
+            toBeConstructedChunkPositions.push_back(chunkLookup + Int3(ChunkManager::chunkSizeXYZ, 0, 0));
+        }
+    });
 
     SLog1("%zu chunks", chunkManager->worldChunks.size());
 
@@ -588,9 +596,6 @@ SDL_AppResult App::Init() {
 
     frameProfiler.StartWindow(kFreeModeProfilerWindowFrames, "free");
     LogProfilerHeader();
-
-    delete noise;
-    noise = nullptr;
 
     SDL_WaitForGPUIdle(m_gpuDevice.get()); //Block rendering and showing window until gpu is idle
 
@@ -660,9 +665,9 @@ SDL_AppResult App::Event(const SDL_Event *event) {
             }
 
             if (event->key.key == SDLK_SPACE) {
-                auto raycastHit = RaycastRay(sceneCamera->Position - Vector(0, 0.1f, 0), GetGravityVector().Normalized(), kCameraHeightAboveGround);
+                //auto raycastHit = RaycastRay(sceneCamera->Position - Vector(0, 0.1f, 0), GetGravityVector().Normalized(), kCameraHeightAboveGround);
                 //if (raycastHit.hit) {
-                sceneCamera->SetMoveState(Camera::Up, true);
+                //    sceneCamera->SetMoveState(Camera::Up, true);
                 //}
             }
 
@@ -672,6 +677,16 @@ SDL_AppResult App::Event(const SDL_Event *event) {
 
             if (event->key.key == SDLK_B && !event->key.repeat) {
                 ToggleBenchmark();
+            }
+
+            if (event->key.key == SDLK_E) {
+                Vector cameraLookVector = sceneCamera->forward;
+
+                SLog1("Camera looking at %f,%f,%f", cameraLookVector.x, cameraLookVector.y, cameraLookVector.z);
+                auto result = RaycastRay(sceneCamera->Position, cameraLookVector.Normalized(), 5);
+                if (result.hit) {
+                    chunkManager->removeBlock(result.blockPosition);
+                }
             }
 
             break;
@@ -705,16 +720,6 @@ SDL_AppResult App::Event(const SDL_Event *event) {
                 // MoveCameraLocal(Vector(0.f, -.2f, 0.f), kCameraMoveStep);
                 sceneCamera->SetMoveState(Camera::Down, false);
             }
-
-            if (event->key.key == SDLK_E) {
-                Vector cameraLookVector = sceneCamera->forward;
-
-                SDL_Log("Camera looking at %f,%f,%f", cameraLookVector.x, cameraLookVector.y, cameraLookVector.z);
-                auto result = RaycastRay(sceneCamera->Position, cameraLookVector.Normalized(), 5);
-                if (result.hit) {
-                    chunkManager->removeBlock(result.blockPosition);
-                }
-            }
             break;
 
         // case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -738,6 +743,10 @@ SDL_AppResult App::Event(const SDL_Event *event) {
 }
 
 void App::Quit(SDL_AppResult result) {
+    chunkConstructionThread.request_stop();
+    chunkConstructionThread.join();
+    chunkConstructionThread = std::jthread();
+
     frameProfiler.Report();
 
     auto quitStartTicks = SDL_GetTicks();
@@ -781,6 +790,9 @@ void App::Quit(SDL_AppResult result) {
         SDL_free(basePath);
     }
 
+    delete noise;
+    noise = nullptr;
+
     cubeMesh.reset();
     chunkManager.reset();
     textureManager.reset();
@@ -795,6 +807,32 @@ void App::Quit(SDL_AppResult result) {
 }
 
 App::~App() = default;
+
+void App::BuildToBeConstructedChunks() {
+    std::scoped_lock lock(chunkQueueMutex);
+
+    bool any = false;
+    for (const auto &chunkPosition: toBeConstructedChunkPositions) {
+        if (chunkManager->findChunk(chunkPosition) == nullptr) {
+            ConstructChunkAtLine(chunkPosition.toVector());
+            SDL_Log("Doing %i,%i,%i", chunkPosition.a, chunkPosition.b, chunkPosition.c);
+
+            any = true;
+        }
+    }
+
+    if (any) {
+        auto lookup = ChunkManager::chunkLookupFromBlockPosition(cameraPositionSnapshot);
+        chunkManager->markNeighborDirty(lookup, 0, 1);
+        chunkManager->markNeighborDirty(lookup, 0, -1);
+        chunkManager->markNeighborDirty(lookup, 1, 1);
+        chunkManager->markNeighborDirty(lookup, 1, -1);
+        chunkManager->markNeighborDirty(lookup, 2, 1);
+        chunkManager->markNeighborDirty(lookup, 2, -1);
+    }
+
+    toBeConstructedChunkPositions.clear();
+}
 
 void App::ToggleBenchmark() {
     if (sceneCamera == nullptr) return;
@@ -819,13 +857,24 @@ void App::ToggleBenchmark() {
 void App::ApplyBenchmarkPose() const {
     const BenchmarkPose pose = BenchmarkPoseForFrame(benchmarkFrame);
     sceneCamera->Position = pose.position;
-    RotateCameraLocal(pose.lookDegrees);
+    sceneCamera->pitch = pose.lookDegrees.x;
+    sceneCamera->yaw = pose.lookDegrees.y;
+    sceneCamera->roll = pose.lookDegrees.z;
+
+    sceneCamera->UpdateDirectionVectors();
+    // RotateCameraLocal(pose.lookDegrees);
 }
 
 void App::LogProfilerHeader() const {
+#ifdef NDEBUG
     SDL_Log("[Profiler] header: mode=%s present=%s NDEBUG=%s compiler=%s debugLevel=%d worldChunks=%zu chunkMap=%zu",
             benchmarkActive ? "benchmark" : "free", presentModeName, kNdebugState, kCompilerVersion, debugLevel,
             chunkManager ? chunkManager->worldChunks.size() : 0, chunkManager ? chunkManager->chunkMap.size() : 0);
+#else
+    SDL_Log("[Profiler] header: mode=%s present=%s compiler=%s debugLevel=%d worldChunks=%zu chunkMap=%zu",
+            benchmarkActive ? "benchmark" : "free", presentModeName, kCompilerVersion, debugLevel,
+            chunkManager ? chunkManager->worldChunks.size() : 0, chunkManager ? chunkManager->chunkMap.size() : 0);
+#endif
 }
 
 // SDL_AppResult App::OnQuit() {
@@ -1134,6 +1183,10 @@ SDL_AppResult App::OnUpdate() {
 
     currentMillisecondsSinceStart = SDL_GetTicks();
 
+    // std::scoped_lock lock(chunkQueueMutex);
+    cameraPositionSnapshot = sceneCamera->Position;
+    BuildToBeConstructedChunks();
+
     if (benchmarkActive) {
         ApplyBenchmarkPose();
         benchmarkFrame += 1;
@@ -1141,14 +1194,6 @@ SDL_AppResult App::OnUpdate() {
     }
 
     sceneCamera->MoveCameraBasedOnVelocity();
-
-    //if (sceneCamera->Position.y >= kCameraHeightAboveGround) {
-    //sceneCamera->AddForceThisTick((GetGravityVector() * ((float) deltaTimeMS / 1000.f * kGravityMultiplier)));
-    //} else {
-    // SDL_Log("%f", sceneCamera->Position.y);
-    //sceneCamera->ResetVelocityAlongWorldAxis(Vector(0, 1, 0));
-    //sceneCamera->Position.y = 0 + kCameraHeightAboveGround;
-    //}
 
     auto hit = RaycastRay(sceneCamera->Position, GetGravityVector().Normalized(), kCameraHeightAboveGround);
     if (hit.hit) {
@@ -1188,11 +1233,11 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
 
             //SDL_Log("Line %i, %i %i chunks with dist %i has noise value of %f (%i)", x, z, numChunksOnY, distToGroundZero, rawNoiseVal, rawNoiseValInt);
 
-            Chunk<ChunkManager::chunkSizeXYZ> *currentlyWorkingChunk = nullptr;
+            Chunk<ChunkManager::chunkSizeXYZ> *currentlyWorkingChunk = nullptr; //TODO: replace w index
 
             //Chunk at index 0 is the "highest chunk"
             for (int chunkI = 0; chunkI < numChunksOnY; chunkI += 1) {
-                Vector currentPlacePos = Vector(atPos.x, -(chunkI * ChunkManager::chunkSizeXYZ), atPos.z);
+                Vector currentPlacePos = Vector(atPos.x, atPos.y - (chunkI * ChunkManager::chunkSizeXYZ), atPos.z);
 
                 for (const auto &chunk: yChunks) {
                     //if (chunk.atPosition == currentPlacePos) {
@@ -1204,7 +1249,7 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
                 }
 
                 if (currentlyWorkingChunk == nullptr) {
-                    Chunk<ChunkManager::chunkSizeXYZ> newChunk(Vector(atPos.x, -(chunkI * ChunkManager::chunkSizeXYZ), atPos.z));
+                    Chunk<ChunkManager::chunkSizeXYZ> newChunk(Vector(atPos.x, atPos.y - (chunkI * ChunkManager::chunkSizeXYZ), atPos.z));
                     yChunks.push_back(std::move(newChunk));
                     currentlyWorkingChunk = &yChunks.back();
 

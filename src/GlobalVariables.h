@@ -65,7 +65,7 @@ static constexpr float defaultScreenHeight = 1080;
 static constexpr float defaultAspectRatio = defaultScreenWidth / defaultScreenHeight;
 
 static constexpr float kMouseLookSensitivity = 0.2f;
-static constexpr float kMoveSpeed = 1.75f;
+static constexpr float kMoveSpeed = 5; //1.75f;
 static constexpr float kJumpForceMagnitude = 0.3f;
 static constexpr float kBlockHalfExtent = 0.5f;
 static constexpr float kCameraHeightAboveGround = 1.5f;

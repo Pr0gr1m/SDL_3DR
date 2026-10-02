@@ -1,9 +1,6 @@
 #ifndef SDL1_OBJECT_H
 #define SDL1_OBJECT_H
 
-#include <cmath>
-
-#include "Matrix3D.h"
 #include "Mesh.h"
 #include "Vector.h"
 

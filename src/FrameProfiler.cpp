@@ -59,6 +59,7 @@ void FrameProfiler::Report() const {
 
     const size_t frameCount = window.size();
     SDL_Log("[Profiler] mode=%s frames=%zu (window %zu)", modeLabel.c_str(), frameCount, windowFrames);
+    SDL_Log("[Profiler] Num frames: %zu (window %zu)", frameCount, windowFrames);
 
     std::vector<double> values(frameCount);
     for (size_t stage = 0; stage < kStageCount; stage += 1) {

@@ -1,10 +1,12 @@
 #pragma once
 #include <memory>
+#include <thread>
 #include <vector>
 #include <SDL3/SDL.h>
 
 #include "ChunkMeshStore.h"
 #include "FrameProfiler.h"
+#include "core/Camera.h"
 #include "core/Ray.h"
 #include "core/Chunk.h"
 #include "core/ChunkManager.h"
@@ -17,6 +19,16 @@
  */
 class App {
 public:
+    void MoveCameraHorizontal(const Vector &localDirection, float distance);
+
+    void MoveCameraWithForce(const Vector &forceDir, float mag);
+
+    void RotateCameraLocal(Vector degreesCameraEulerAngle);
+
+    void MoveCameraBasedOnStates();
+
+    void BuildCameraFromState();
+
     App(int argc, char **argv);
 
     ///Initializes application
@@ -65,6 +77,8 @@ private:
 
     std::unique_ptr<ChunkManager> chunkManager;
     std::unique_ptr<TextureManager> textureManager;
+
+    std::unique_ptr<Camera> sceneCamera = nullptr;
 
     Vector cubeVerticies[8] =
     {
@@ -136,6 +150,14 @@ private:
     Uint64 benchmarkFrame = 0;
     Vector benchmarkSavedPosition;
 
+    std::vector<Int3> toBeConstructedChunkPositions;
+    std::mutex chunkQueueMutex;
+
+    std::jthread chunkConstructionThread;
+    Vector cameraPositionSnapshot;
+
+    void BuildToBeConstructedChunks();
+
     ///Toggles the deterministic camera orbit used for timing comparisons
     void ToggleBenchmark();
 
@@ -144,4 +166,7 @@ private:
 
     ///Logs the profiler header describing mode, present mode, build and world size
     void LogProfilerHeader() const;
+
+    ///Checks camera position to create new chunks
+    void UpdateMovementAndCreateNewChunks();
 };

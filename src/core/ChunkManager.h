@@ -101,7 +101,7 @@ public:
         markBoundaryNeighborsDirty(chunk, localPosition);
     }
 
-private:
+    // private:
     ///Marks the loaded chunk next to chunkLookup along the axis (0 = x, 1 = y, 2 = z) in the given direction (-1 or 1) dirty
     void markNeighborDirty(const Int3 &chunkLookup, const int axis, const int direction) {
         std::array<int, 3> neighborLookup{chunkLookup.a, chunkLookup.b, chunkLookup.c};

@@ -68,6 +68,10 @@ public:
 
         return false;
     }
+
+    Int3 operator+(const Int3 &int3) const {
+        return Int3(a + int3.a, b + int3.b, c + int3.c);
+    }
 };
 
 //For unordered map (hash table) i need hash function for Int3 (https://en.cppreference.com/cpp/utility/hash/operator())
