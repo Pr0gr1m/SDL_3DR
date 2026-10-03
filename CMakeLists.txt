@@ -35,6 +35,8 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/core/Face.cpp
         src/core/Face.h
         src/GlobalVariables.h
+        src/core/Player.cpp
+        src/core/Player.h
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -39,21 +39,6 @@ public:
 
     bool operator<(const Int3 &other) const {
         //Priority: a,b,c (x,y,z)
-        // if (a == other.a && b == other.b && c == other.c) {
-        //     return false;
-        // }
-
-        // if (a < other.a) {
-        //     return true;
-        // }
-        //
-        // if (b < other.b) {
-        //     return true;
-        // }
-        // if (c < other.c) {
-        //     return true;
-        // }
-
         if (a != other.a) {
             return a < other.a;
         }
@@ -70,7 +55,16 @@ public:
     }
 
     Int3 operator+(const Int3 &int3) const {
-        return Int3(a + int3.a, b + int3.b, c + int3.c);
+        return {a + int3.a, b + int3.b, c + int3.c};
+    }
+
+    Int3 operator*(const int &x) const {
+        return {a * x, b * x, c * x};
+    }
+
+    Int3 &zeroY() {
+        this->b = 0;
+        return *this;
     }
 };
 
@@ -85,7 +79,7 @@ public:
         std::size_t hashC = std::hash<int>{}(int3.c);
 
         //I dont got boost libraries so i need to combine manually, but im not sure if it cannot be just random values/other equation
-        return (hashA ^ (hashB * 420) ^ (hashC * 67)); // << 1 is just multiplying by 2 and ^ is just power
+        return (hashA ^ (hashB * 400) ^ (hashC * 60)); // << 1 is just multiplying by 2 and ^ is just power
     }
 };
 

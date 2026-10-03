@@ -27,6 +27,8 @@ public:
     ///Returns an Int3 containing Vector's fields as integers
     Int3 toInt3() const;
 
+    Vector floored() const;
+
     ///Returns magnitude of the vector
     float Magnitude() const;
 
@@ -93,7 +95,10 @@ public:
         return *this;
     }
 
-    Vector floored() const;
+    Vector &zeroY() {
+        this->y = 0;
+        return *this;
+    }
 };
 
 inline float Vector::Magnitude() const {

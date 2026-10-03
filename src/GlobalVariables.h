@@ -49,6 +49,9 @@ template<std::floating_point N>
 
 [[nodiscard]] static constexpr int toInt(float f) { return static_cast<int>(std::lround(f)); }
 
+template<typename N>
+[[nodiscard]] static constexpr int toInt(N f) { return static_cast<int>(std::lround(f)); }
+
 /**
  *@enum AppLogCategory
  *@brief Describes custom error log categories
@@ -60,16 +63,20 @@ enum AppLogCategory {
 
 inline extern constexpr RaycastHit RaycastHit_NULL = {};
 
-static constexpr float defaultScreenWidth = 1920;
-static constexpr float defaultScreenHeight = 1080;
-static constexpr float defaultAspectRatio = defaultScreenWidth / defaultScreenHeight;
+inline constexpr int numPlayerSlots = 2;
 
-static constexpr float kMouseLookSensitivity = 0.2f;
-static constexpr float kMoveSpeed = 5; //1.75f;
-static constexpr float kJumpForceMagnitude = 0.3f;
-static constexpr float kBlockHalfExtent = 0.5f;
-static constexpr float kCameraHeightAboveGround = 1.5f;
-static constexpr float kGravityMultiplier = 1;
+inline constexpr float noiseFrequency = 0.05f;
+inline constexpr float noiseAmplitude = 2.f;
 
-static constexpr float DEG_2_RAD = M_PI / 180.0f;
-// }
+inline constexpr float defaultScreenWidth = 1920;
+inline constexpr float defaultScreenHeight = 1080;
+inline constexpr float defaultAspectRatio = defaultScreenWidth / defaultScreenHeight;
+
+inline constexpr float kMouseLookSensitivity = 0.2f;
+inline constexpr float kMoveSpeed = 1.75f;
+inline constexpr float kJumpForceMagnitude = 0.3f;
+inline constexpr float kBlockHalfExtent = 0.5f;
+inline constexpr float kCameraHeightAboveGround = 1.5f;
+inline constexpr float kGravityMultiplier = 1;
+
+inline constexpr float DEG_2_RAD = M_PI / 180.0f;

@@ -42,7 +42,7 @@ Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
 
 inline constexpr Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
 inline constexpr float cameraMinYPosition = -5;
-inline constexpr float epsilon = +0.0001f;
+inline constexpr float epsilon = +0.0001f; //simplex noise generates value 0 in integer coordinates hence epsilon
 inline constexpr int groundZeroYLevel = -2; //only 1 chunk for test
 
 //TODO: Before full release, change CMakeList.txt to put built shaders in build dir
@@ -566,7 +566,7 @@ SDL_AppResult App::Init() {
         return FAILURE;
     }
 
-    noise = new SimplexNoise(0.15f, 3, 0, 0);
+    noise = new SimplexNoise(noiseFrequency, noiseAmplitude, 0, 0);
 
     toBeConstructedChunkPositions.reserve(8);
 
@@ -579,14 +579,26 @@ SDL_AppResult App::Init() {
             if (safetyLimit >= 1000) break;
             safetyLimit += 1;
 
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
             if (st.stop_requested()) break;
 
-            const Int3 chunkLookup = ChunkManager::chunkLookupFromBlockPosition(cameraPositionSnapshot);
+            const Int3 chunkLookup = ChunkManager::chunkLookupFromBlockPosition(cameraPositionSnapshot.zeroY());
 
-            // std::scoped_lock lock(chunkQueueMutex);
-            toBeConstructedChunkPositions.push_back(chunkLookup + Int3(-ChunkManager::chunkSizeXYZ, 0, 0));
-            toBeConstructedChunkPositions.push_back(chunkLookup + Int3(ChunkManager::chunkSizeXYZ, 0, 0));
+            std::scoped_lock<std::mutex> lock(chunkQueueMutex); //lock because toBeConstructedChunkPositions
+
+            //normal
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(-1, 0, 0) * ChunkManager::chunkSizeXYZ).zeroY());
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(1, 0, 0) * ChunkManager::chunkSizeXYZ).zeroY());
+
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(0, 0, 1) * ChunkManager::chunkSizeXYZ).zeroY());
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(0, 0, -1) * ChunkManager::chunkSizeXYZ).zeroY());
+
+            //diagnal
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(-1, 0, -1) * ChunkManager::chunkSizeXYZ).zeroY());
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(1, 0, -1) * ChunkManager::chunkSizeXYZ).zeroY());
+
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(-1, 0, 1) * ChunkManager::chunkSizeXYZ).zeroY());
+            toBeConstructedChunkPositions.push_back(chunkLookup + (Int3(1, 0, 1) * ChunkManager::chunkSizeXYZ).zeroY());
         }
     });
 
@@ -811,24 +823,18 @@ App::~App() = default;
 void App::BuildToBeConstructedChunks() {
     std::scoped_lock lock(chunkQueueMutex);
 
-    bool any = false;
     for (const auto &chunkPosition: toBeConstructedChunkPositions) {
         if (chunkManager->findChunk(chunkPosition) == nullptr) {
             ConstructChunkAtLine(chunkPosition.toVector());
-            SDL_Log("Doing %i,%i,%i", chunkPosition.a, chunkPosition.b, chunkPosition.c);
 
-            any = true;
+            auto lookup = ChunkManager::chunkLookupFromBlockPosition(chunkPosition.toVector());
+            chunkManager->markNeighborDirty(lookup, 0, 1);
+            chunkManager->markNeighborDirty(lookup, 0, -1);
+            chunkManager->markNeighborDirty(lookup, 1, 1);
+            chunkManager->markNeighborDirty(lookup, 1, -1);
+            chunkManager->markNeighborDirty(lookup, 2, 1);
+            chunkManager->markNeighborDirty(lookup, 2, -1);
         }
-    }
-
-    if (any) {
-        auto lookup = ChunkManager::chunkLookupFromBlockPosition(cameraPositionSnapshot);
-        chunkManager->markNeighborDirty(lookup, 0, 1);
-        chunkManager->markNeighborDirty(lookup, 0, -1);
-        chunkManager->markNeighborDirty(lookup, 1, 1);
-        chunkManager->markNeighborDirty(lookup, 1, -1);
-        chunkManager->markNeighborDirty(lookup, 2, 1);
-        chunkManager->markNeighborDirty(lookup, 2, -1);
     }
 
     toBeConstructedChunkPositions.clear();
@@ -1216,16 +1222,18 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
     std::vector<Chunk<ChunkManager::chunkSizeXYZ> > yChunks;
     for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
         for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
-            //simplex noise generates value 0 in integer coordinates
-            float rawNoiseVal = SimplexNoise::noise((x * noise->mFrequency) + epsilon, (z * noise->mFrequency) + epsilon);
-            rawNoiseVal += 1;
-            rawNoiseVal *= 2;
+            const float worldX = atPos.x + static_cast<float>(x);
+            const float worldZ = atPos.z + static_cast<float>(z);
 
+            float rawNoiseVal = SimplexNoise::noise((worldX * noise->mFrequency) + epsilon, (worldZ * noise->mFrequency) + epsilon); //[-1,1]
+            int rawNoiseValInt{0};
+
+            rawNoiseVal = rawNoiseVal + 1; //[0,1]
+            rawNoiseVal = rawNoiseVal * 2; //[0,2]
             if (true) {
-                //rawNoiseVal = pow(2, rawNoiseVal);
+                rawNoiseValInt = toInt<double>(pow(1.5, rawNoiseVal));
             }
 
-            int rawNoiseValInt = static_cast<int>(rawNoiseVal);
 
             int distToGroundZero = rawNoiseValInt - groundZeroYLevel;
             int firstChunkBlocks = distToGroundZero % 16;
