@@ -37,6 +37,11 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/GlobalVariables.h
         src/core/Player.cpp
         src/core/Player.h
+        src/core/Block.h
+        src/core/ParticleSystem.h
+        src/core/Bounds.h
+        src/core/GenericParticleSystem.cpp
+        src/core/GenericParticleSystem.h
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -17,6 +17,11 @@ inline constexpr int debugLevel = 0; //switch to 0/-1 for Release, adds around 7
 #define SLog1(...) do { if (debugLevel >= 1) SDL_Log(__VA_ARGS__); } while (0) //__VA_ARGS__ forwards every argument
 #define SLog2(...) do { if (debugLevel >= 2) SDL_Log(__VA_ARGS__); } while (0) //__VA_ARGS__ forwards every argument
 
+///Returns a downwards vector / opposite to world up
+inline constexpr Vector GetGravityVector() {
+    return Vector(0, -1, 0) * 9.81f;
+}
+
 /**
  *@file GlobalVariables.h
  *@brief File holding global variables, functions and macros
@@ -61,9 +66,15 @@ enum AppLogCategory {
     APP_LOG_CATEGORY_VIDEO = SDL_LOG_CATEGORY_VIDEO
 };
 
+inline float kMoveSpeed = 1.75f;
+inline constexpr float kWalkSpeed = 1.75f;
+inline constexpr float kRunSpeed = 4.f;
+
 inline extern constexpr RaycastHit RaycastHit_NULL = {};
 
 inline constexpr int numPlayerSlots = 2;
+
+inline constexpr size_t particleSystemMaxParticles = 20;
 
 inline constexpr float noiseFrequency = 0.05f;
 inline constexpr float noiseAmplitude = 2.f;
@@ -73,7 +84,6 @@ inline constexpr float defaultScreenHeight = 1080;
 inline constexpr float defaultAspectRatio = defaultScreenWidth / defaultScreenHeight;
 
 inline constexpr float kMouseLookSensitivity = 0.2f;
-inline constexpr float kMoveSpeed = 1.75f;
 inline constexpr float kJumpForceMagnitude = 0.3f;
 inline constexpr float kBlockHalfExtent = 0.5f;
 inline constexpr float kCameraHeightAboveGround = 1.5f;

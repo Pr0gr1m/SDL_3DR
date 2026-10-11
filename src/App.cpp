@@ -7,7 +7,6 @@
 #include <vector>
 #include <SDL3/SDL.h>
 #include <chrono>
-#include <cmath>
 #include <cstring>
 #include <string>
 #include <limits>
@@ -23,6 +22,7 @@
 #include "core/Camera.h"
 #include "core/Chunk.h"
 #include "core/ChunkMesher.h"
+#include "core/GenericParticleSystem.h"
 #include "core/Matrix4D.h"
 #include "core/Vertex3D.h"
 
@@ -37,12 +37,12 @@
 
 static SimplexNoise *noise;
 
-Vector startingCameraPos = Vector(0.f, 50.f, 0.f);
+Vector startingCameraPos = Vector(4.f, 50.f, 4.f);
 Vector degreesCameraEulerAngle = Vector(0.f, 0.f, 0.f);
 
 inline constexpr Uint32 BytesPerPixel = 4; //8 bits from red, green, blue, alpha channels = 32 bits = 4 bytes
 inline constexpr float cameraMinYPosition = -5;
-inline constexpr float epsilon = +0.0001f; //simplex noise generates value 0 in integer coordinates hence epsilon
+inline constexpr float Epsilon = +0.0001f; //simplex noise generates value 0 in integer coordinates hence epsilon
 inline constexpr int groundZeroYLevel = -2; //only 1 chunk for test
 
 //TODO: Before full release, change CMakeList.txt to put built shaders in build dir
@@ -182,11 +182,11 @@ void App::MoveCameraBasedOnStates() {
     }
 
     if (sceneCamera->GetMoveState(Camera::Up)) {
-        MoveCameraWithForce(App::GetGravityVector().Normalized().Negated(), kJumpForceMagnitude);
+        MoveCameraWithForce(GetGravityVector().Normalized().Negated(), kJumpForceMagnitude);
     }
 
     if (sceneCamera->GetMoveState(Camera::Down)) {
-        MoveCameraWithForce(App::GetGravityVector().Normalized(), kJumpForceMagnitude);
+        MoveCameraWithForce(GetGravityVector().Normalized(), kJumpForceMagnitude);
     }
 }
 
@@ -554,6 +554,9 @@ SDL_AppResult App::Init() {
 
     this->cubeMesh = std::make_unique<Mesh>(cubeVerticies, std::size(cubeVerticies), cubeTriangles, std::size(cubeTriangles));
 
+    SLog2("Creating player...");
+    this->player = std::make_unique<Player>();
+
     SLog2("Creating managers...");
     this->chunkManager = std::make_unique<ChunkManager>();
     this->textureManager = std::make_unique<TextureManager>(this->basePath);
@@ -694,11 +697,92 @@ SDL_AppResult App::Event(const SDL_Event *event) {
             if (event->key.key == SDLK_E) {
                 Vector cameraLookVector = sceneCamera->forward;
 
-                SLog1("Camera looking at %f,%f,%f", cameraLookVector.x, cameraLookVector.y, cameraLookVector.z);
                 auto result = RaycastRay(sceneCamera->Position, cameraLookVector.Normalized(), 5);
+                //hit and breakable
                 if (result.hit) {
+                    constexpr int numBreakParticles = particleSystemMaxParticles;
+                    std::array<Vector, numBreakParticles> breakParticlesPositions;
+                    std::array<Vector, numBreakParticles> breakParticlesUpNormal;
+                    std::array<Vector, numBreakParticles> breakParticlesVelocities;
+
+                    std::array<float, numBreakParticles> breakParticleScaleMultipliers{};
+                    Vector epsilon = Vector(Epsilon, Epsilon, Epsilon);
+                    for (size_t i = 0; i < numBreakParticles; i += 1) {
+                        auto noiseCoords = result.blockPosition + epsilon + Vector(i * 1.37f, i * 2.19f, i * 0.73f);
+
+                        float noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z);
+                        float noiseB = SimplexNoise::noise(noiseCoords.z, noiseCoords.x);
+
+                        noiseA *= 0.75f;
+                        noiseB *= 0.75f;
+
+                        // if (noiseA < 0) {
+                        //     noiseA = -1 + (noiseA + 1) * 1.35f;
+                        // } else {
+                        //     noiseA = noiseA * 0.65f + 0.05f;
+                        // }
+                        //
+                        // if (noiseB < 0) {
+                        //     noiseB = -1 + (noiseB + 1) * 1.35f;
+                        // } else {
+                        //     noiseB = noiseB * 0.65f + 0.05f;
+                        // }
+
+                        Vector particlePosition = Vector(noiseA, 0.45f, noiseB); //to be used later
+                        breakParticlesPositions[i] = particlePosition;
+
+                        noiseCoords += result.blockPosition + epsilon + Vector(i * 1.33f, i * 2.79f, i * 0.71f);
+                        //noiseCoords += result.blockPosition + Vector(noiseA, 0, noiseB);
+
+                        noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z);
+                        noiseB = SimplexNoise::noise(noiseCoords.z, noiseCoords.x);
+
+                        noiseA = std::fabs(noiseA) * (particlePosition.x > 0 ? 1.f : -1.f);
+                        noiseA = std::fabs(noiseA) * (particlePosition.z > 0 ? 1.f : -1.f);
+
+                        noiseCoords += result.blockPosition + epsilon + Vector(i * 1.33f, i * 2.79f, i * 0.71f);
+
+                        //make noise a and b [0.35, 1.35] (it will be normalized anyway)
+                        // noiseA += 1;
+                        // noiseA *= 0.5f;
+                        // noiseA += 0.35f;
+
+                        // noiseB += 1;
+                        // noiseB *= 0.5f;
+                        // noiseB += 0.35f;
+                        // noiseA *= SimplexNoise::noise(noiseCoords.x, noiseCoords.z) > 1 ? 1 : -1;
+                        // noiseB *= SimplexNoise::noise(noiseCoords.z, noiseCoords.x) > 1 ? 1 : -1;
+
+                        //breakParticlesVelocites[i] = Vector((noiseB + 1) * 0.5f, 1, (noiseA + 1) * 0.5f).Normalized() * 0.05f;
+                        breakParticlesVelocities[i] = Vector(noiseA, .75f, noiseB).Normalized() * 1.25f;
+
+                        noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z);
+                        noiseA = fmod(noiseA, 1.65) + 0.85;
+
+                        noiseCoords += result.blockPosition + epsilon + Vector(i * 1.37f, i * 2.19f, i * 0.73f);
+
+                        breakParticleScaleMultipliers[i] = noiseA;
+
+                        breakParticlesUpNormal[i] = Vector(0, 1, 0);
+                    }
+
+                    GenericParticleSystem<particleSystemMaxParticles> genericBreakEffect{m_gpuDevice.get(), 4000};
+                    genericBreakEffect.worldOffset = result.blockPosition + Vector(0, -0.5f, 0); //add half since its block
+                    // genericBreakEffect.collisionType = GenericParticleSystem<20>::Advanced;
+                    genericBreakEffect.chunkManager.emplace(chunkManager.get());
+
+                    genericBreakEffect.InsertParticlesByArray(&breakParticlesPositions[0], &breakParticlesUpNormal[0], &breakParticlesVelocities[0], &breakParticleScaleMultipliers[0], numBreakParticles);
+
+                    genericBreakEffect.UpdateParticleSystem();
+                    this->particleSystems.push_back(std::make_unique<GenericParticleSystem<particleSystemMaxParticles> >(std::move(genericBreakEffect)));
+
                     chunkManager->removeBlock(result.blockPosition);
+                    player->CollectBlock(result.blockType, true);
                 }
+            }
+
+            if (event->key.key == SDLK_LSHIFT || event->key.key == SDLK_RSHIFT) {
+                kMoveSpeed = kRunSpeed;
             }
 
             break;
@@ -732,6 +816,11 @@ SDL_AppResult App::Event(const SDL_Event *event) {
                 // MoveCameraLocal(Vector(0.f, -.2f, 0.f), kCameraMoveStep);
                 sceneCamera->SetMoveState(Camera::Down, false);
             }
+
+            if (event->key.key == SDLK_LSHIFT || event->key.key == SDLK_RSHIFT) {
+                kMoveSpeed = kWalkSpeed;
+            }
+
             break;
 
         // case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -765,6 +854,12 @@ void App::Quit(SDL_AppResult result) {
     SLog1("Quit event, freeing memory");
 
     SDL_WaitForGPUIdle(m_gpuDevice.get()); //Block thread until GPU is idle
+
+    for (auto &particleSystem: particleSystems) {
+        particleSystem->Dispose();
+        //if (particleSystem->transferBuffer) SDL_ReleaseGPUTransferBuffer(m_gpuDevice.get(), particleSystem->transferBuffer);
+        //if (particleSystem->buffer) SDL_ReleaseGPUBuffer(m_gpuDevice.get(), particleSystem->buffer);
+    }
 
     if (chunkMeshStore) {
         chunkMeshStore->ReleaseAll();
@@ -1187,6 +1282,26 @@ SDL_AppResult App::OnUpdate() {
     deltaTimeMS = SDL_GetTicks() - currentMillisecondsSinceStart;
     sceneCamera->deltaTimeMS = deltaTimeMS;
 
+    for (auto &particleSystem: particleSystems) {
+        if (particleSystem != nullptr) {
+            particleSystem->TickParticleSystem(deltaTimeMS);
+            if (!particleSystem->toBeDestroyed) {
+                particleSystem->UpdateParticleSystem();
+            }
+        }
+    }
+
+
+    for (auto &particleSystem: particleSystems) {
+        if (particleSystem->toBeDestroyed) {
+            particleSystem.reset();
+        }
+    }
+
+    std::erase_if(particleSystems, [](const auto &ps) {
+        return !ps;
+    });
+
     currentMillisecondsSinceStart = SDL_GetTicks();
 
     // std::scoped_lock lock(chunkQueueMutex);
@@ -1225,7 +1340,7 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
             const float worldX = atPos.x + static_cast<float>(x);
             const float worldZ = atPos.z + static_cast<float>(z);
 
-            float rawNoiseVal = SimplexNoise::noise((worldX * noise->mFrequency) + epsilon, (worldZ * noise->mFrequency) + epsilon); //[-1,1]
+            float rawNoiseVal = SimplexNoise::noise((worldX * noise->mFrequency) + Epsilon, (worldZ * noise->mFrequency) + Epsilon); //[-1,1]
             int rawNoiseValInt{0};
 
             rawNoiseVal = rawNoiseVal + 1; //[0,1]
@@ -1233,7 +1348,6 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
             if (true) {
                 rawNoiseValInt = toInt<double>(pow(1.5, rawNoiseVal));
             }
-
 
             int distToGroundZero = rawNoiseValInt - groundZeroYLevel;
             int firstChunkBlocks = distToGroundZero % 16;
@@ -1298,7 +1412,7 @@ RaycastHit App::CheckIsPointInsideAny(Vector point) const {
         if (blockAt != nullptr && blockAt->has_value()) {
             return RaycastHit{
                 .hit = true,
-                .blockType = true,
+                .blockType = blockAt->value().blockType,
                 .blockPosition = blockAt->value().Position + chunk.atPosition
             };
         }
@@ -1372,10 +1486,6 @@ RaycastHit App::RaycastRay(Vector pos, Vector normDir, float maxDistance) const 
     return RaycastHit_NULL;
 }
 
-constexpr Vector App::GetGravityVector() {
-    return Vector(0, -1, 0) * 9.81f;
-}
-
 SDL_AppResult App::OnRender() {
     SDL_GPUCommandBuffer *commandBuffer = SDL_AcquireGPUCommandBuffer(m_gpuDevice.get());
     if (commandBuffer == nullptr) {
@@ -1406,14 +1516,47 @@ SDL_AppResult App::OnRender() {
     }
     frameProfiler.AddCount(FrameProfiler::Counter::ChunksRemeshed, meshUpdates.size());
 
+    stageScope.emplace(frameProfiler, FrameProfiler::Stage::Upload);
     if (!meshUpdates.empty()) {
-        stageScope.emplace(frameProfiler, FrameProfiler::Stage::Upload);
         if (!chunkMeshStore->Upload(commandBuffer, meshUpdates)) {
             SDL_SubmitGPUCommandBuffer(commandBuffer);
             return FAILURE;
         }
         frameProfiler.AddCount(FrameProfiler::Counter::BytesUploaded, bytesToUpload);
     }
+
+    //std::vector<std::unique_ptr<ParticleSystem<particleSystemMaxParticles> > > particleSystemsCopy;
+
+    if (!particleSystems.empty()) {
+        SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+        for (auto &ParticleSystem: particleSystems) {
+            if (ParticleSystem == nullptr) {
+                continue;
+            }
+            if (ParticleSystem->nParticles == 0) continue;
+
+            ParticleSystem->Upload();
+
+            // if (ParticleSystem->buffer) SDL_ReleaseGPUBuffer(m_gpuDevice.get(), ParticleSystem->buffer);
+            // ParticleSystem->buffer = nullptr;
+            //
+            // const auto bytes = std::bit_ceil(static_cast<Uint32>(sizeof(Vertex3D) * ParticleSystem->lastFrameParticleVerticies.size()));
+            //
+            // SDL_GPUBufferCreateInfo bufferInfo{};
+            // bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
+            // bufferInfo.size = bytes;
+            // ParticleSystem->buffer = SDL_CreateGPUBuffer(m_gpuDevice.get(), &bufferInfo);
+
+            const SDL_GPUTransferBufferLocation source = {ParticleSystem->transferBuffer, static_cast<Uint32>(0)};
+            const SDL_GPUBufferRegion destination = {ParticleSystem->buffer, 0, std::bit_ceil(static_cast<Uint32>(sizeof(Vertex3D) * ParticleSystem->lastFrameParticleVerticies.size()))};
+            SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
+
+            //particleSystemsCopy.push_back(std::move(ParticleSystem));
+        }
+        SDL_EndGPUCopyPass(copyPass);
+    }
+
+    //particleSystems = std::move(particleSystemsCopy);
 
     stageScope.emplace(frameProfiler, FrameProfiler::Stage::Acquire);
     //Acquire the swapchain texture for rendering
@@ -1455,9 +1598,6 @@ SDL_AppResult App::OnRender() {
         return FAILURE;
     }
 
-    SDL_GPUViewport viewport = {0, 0, (float) defaultScreenWidth, (float) defaultScreenHeight, 0.0f, 1.0f};
-    SDL_SetGPUViewport(renderPass, &viewport);
-
     SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
 
     SDL_GPUTextureSamplerBinding bindings[2] =
@@ -1484,6 +1624,22 @@ SDL_AppResult App::OnRender() {
         verticesDrawn += mesh.vertexCount;
         chunksDrawn += 1;
     }
+
+    //for (const auto &[chunkLookup, mesh]: chunkMeshStore->Meshes()) {
+    for (const auto &ParticleSystem: particleSystems) {
+        if (ParticleSystem->nParticles == 0) continue;
+
+        uniforms.chunkOffset[0] = 0;
+        uniforms.chunkOffset[1] = 0;
+        uniforms.chunkOffset[2] = 0;
+
+        SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+
+        const SDL_GPUBufferBinding vertexBinding = {ParticleSystem->buffer, 0};
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+        SDL_DrawGPUPrimitives(renderPass, ParticleSystem->numVerticies(), 1, 0, 0);
+    }
+
     frameProfiler.AddCount(FrameProfiler::Counter::VerticesDrawn, verticesDrawn);
     frameProfiler.AddCount(FrameProfiler::Counter::ChunksDrawn, chunksDrawn);
 

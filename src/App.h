@@ -10,8 +10,9 @@
 #include "core/Ray.h"
 #include "core/Chunk.h"
 #include "core/ChunkManager.h"
+#include "core/ParticleSystem.h"
+#include "core/Player.h"
 #include "core/TextureManager.h"
-#include "core/Vertex3D.h"
 
 /**
  * @class App
@@ -63,9 +64,6 @@ public:
         SDL_GPUShaderFormat sdlFormat;
     };
 
-    ///Returns a downwards vector / opposite to world up
-    static constexpr Vector GetGravityVector();
-
     Uint64 deltaTimeMS; //KEEP IN MIND - NEED TO DIVIDE BY 1000 TO GET SECONDS
     Uint64 currentMillisecondsSinceStart;
 
@@ -79,6 +77,10 @@ private:
     std::unique_ptr<TextureManager> textureManager;
 
     std::unique_ptr<Camera> sceneCamera = nullptr;
+
+    std::unique_ptr<Player> player = nullptr;
+
+    std::vector<std::unique_ptr<ParticleSystem<particleSystemMaxParticles> > > particleSystems;
 
     Vector cubeVerticies[8] =
     {

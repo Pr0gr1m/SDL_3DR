@@ -55,7 +55,33 @@ public:
 
     ///Returns optional Object at relative position in the chunk
     [[nodiscard]] const std::optional<Object> *tryGet(const Vector &p) const {
-        const int x = toInt(p.x), y = toInt(p.y), z = toInt(p.z);
+        const int x = toInt(p.x);
+        const int y = toInt(p.y);
+        const int z = toInt(p.z);
+        if (!isPosInBounds(x, y, z)) return nullptr;
+        return &blocks[chunkIndex(x, y, z)];
+    }
+
+    ///Returns optional Object at relative position in the chunk
+    [[nodiscard]] const std::optional<Object> *tryGet(const Int3 &p) const {
+        if (!isPosInBounds(p.a, p.b, p.c)) return nullptr;
+        return &blocks[chunkIndex(p.a, p.b, p.c)];
+    }
+
+    ///Returns optional Object from world position.
+    [[nodiscard]] const std::optional<Object> *tryGetWorld(const Vector &p) const {
+        const int x = toInt(p.x) - toInt(atPosition.x);
+        const int y = toInt(p.y) - toInt(atPosition.y);
+        const int z = toInt(p.z) - toInt(atPosition.z);
+        if (!isPosInBounds(x, y, z)) return nullptr;
+        return &blocks[chunkIndex(x, y, z)];
+    }
+
+    ///Returns optional Object from world position.
+    [[nodiscard]] const std::optional<Object> *tryGetWorld(const Int3 &p) const {
+        const int x = p.a - toInt(atPosition.x);
+        const int y = p.b - toInt(atPosition.y);
+        const int z = p.c - toInt(atPosition.z);
         if (!isPosInBounds(x, y, z)) return nullptr;
         return &blocks[chunkIndex(x, y, z)];
     }

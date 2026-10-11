@@ -61,6 +61,16 @@ void FrameProfiler::Report() const {
     SDL_Log("[Profiler] mode=%s frames=%zu (window %zu)", modeLabel.c_str(), frameCount, windowFrames);
     SDL_Log("[Profiler] Num frames: %zu (window %zu)", frameCount, windowFrames);
 
+    // double frameSum = 0;
+    // double frameMax = 0;
+    // for (size_t i = 0; i < frameCount; i += 1) {
+    //     frameSum = window[i].stageMs[0];
+    //     if (window[i].stageMs[0] > frameMax) frameMax = window[i].stageMs[0];
+    // }
+    //
+    // float avgFrameRate = 1000.f * (1.f / (frameSum / frameCount));
+    //SDL_Log("Framerate avg %8.3f, p95 %8.3f, max %8.3f", avgFrameRate, , frameMax);
+
     std::vector<double> values(frameCount);
     for (size_t stage = 0; stage < kStageCount; stage += 1) {
         double sum = 0.0;
@@ -70,8 +80,15 @@ void FrameProfiler::Report() const {
         }
         std::ranges::sort(values);
         const size_t p95Index = static_cast<size_t>(std::ceil(0.95 * static_cast<double>(frameCount))) - 1;
-        SDL_Log("[Profiler] %-8s avg %8.3f ms  p95 %8.3f ms  max %8.3f ms", kStageNames[stage],
+        SDL_Log("[Profiler]  %-8s  avg %8.3f ms  p95 %8.3f ms  max %8.3f ms", kStageNames[stage],
                 sum / static_cast<double>(frameCount), values[std::min(p95Index, frameCount - 1)], values.back());
+
+        if (stage == 0) {
+            float avgFrameRate = 1000.f * (1.f / (sum / static_cast<double>(frameCount)));
+            float p95FrameRate = 1000.f * (1.f / (values[std::min(p95Index, frameCount - 1)]));
+            float maxFrameRate = 1000.f * (1.f / (values.back()));
+            SDL_Log("[Profiler]  Framerate avg %8.3f ms  p95 %8.3f ms  min %8.3f ms", avgFrameRate, p95FrameRate, maxFrameRate);
+        }
     }
 
     for (size_t counter = 0; counter < kCounterCount; counter += 1) {
@@ -80,6 +97,8 @@ void FrameProfiler::Report() const {
         SDL_Log("[Profiler] %-16s avg %14.1f  sum %llu", kCounterNames[counter],
                 static_cast<double>(sum) / static_cast<double>(frameCount), static_cast<unsigned long long>(sum));
     }
+
+    SDL_Log("\n");
 }
 
 void FrameProfiler::AddStageTicks(const Stage stage, const Uint64 ticks) {

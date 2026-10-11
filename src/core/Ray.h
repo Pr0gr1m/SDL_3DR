@@ -1,5 +1,6 @@
 #ifndef SDL1_RAY_H
 #define SDL1_RAY_H
+#include "Block.h"
 #include "Vector.h"
 
 /**
@@ -22,7 +23,7 @@ struct RaycastHit {
     bool hit = false;
 
     ///Block type that was hit (boolean as there is 1 block type, mentioned in implementation of App::ConstructChunkAt)
-    bool blockType = false;
+    BlockType blockType{};
 
     ///Hit block's world position
     Vector blockPosition{};

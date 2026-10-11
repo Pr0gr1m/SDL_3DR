@@ -48,7 +48,7 @@ bool ChunkMeshStore::Upload(SDL_GPUCommandBuffer *commandBuffer, const std::vect
     if (!FitsBufferLimit(totalBytes, "transfer buffer")) return false;
     if (!EnsureTransferCapacity(totalBytes)) return false;
 
-    auto *mappedData = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(device, transferBuffer, true));
+    auto *mappedData = static_cast<Uint8 *>(SDL_MapGPUTransferBuffer(device, transferBuffer, true)); //cycling doesnt change much for smaller words
     if (mappedData == nullptr) {
         SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to map chunk transfer buffer: %s", SDL_GetError());
         return false;

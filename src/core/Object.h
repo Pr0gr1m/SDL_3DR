@@ -3,6 +3,7 @@
 
 #include "Mesh.h"
 #include "Vector.h"
+#include "Block.h"
 
 /**
  *@class Object
@@ -72,6 +73,8 @@ public:
 
     ///Objects rotation matrix
     float alpha, beta, gamma;
+
+    BlockType blockType = Dirt;
 };
 
 
