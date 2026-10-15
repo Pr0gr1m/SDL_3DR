@@ -3,13 +3,11 @@
 #include <algorithm>
 #include <cmath>
 
-namespace {
-    constexpr std::array<const char *, 6> kStageNames = {"Frame", "Build", "Upload", "Acquire", "Record", "Submit"};
-    constexpr std::array<const char *, 4> kCounterNames = {"Vertices drawn", "Chunks drawn", "Chunks remeshed", "Bytes uploaded"};
+constexpr std::array<const char *, FrameProfiler::kStageCount> kStageNames = {"Frame", "Build", "Upload", "Acquire", "Record", "Submit"};
+constexpr std::array<const char *, FrameProfiler::kCounterCount> kCounterNames = {"Vertices drawn", "Chunks drawn", "Particle vertices drawn", "Chunks remeshed", "Bytes uploaded"};
 
-    double TicksToMilliseconds(const Uint64 ticks) {
-        return static_cast<double>(ticks) * 1000.0 / static_cast<double>(SDL_GetPerformanceFrequency());
-    }
+double TicksToMilliseconds(const Uint64 ticks) {
+    return static_cast<double>(ticks) * 1000.0 / static_cast<double>(SDL_GetPerformanceFrequency());
 }
 
 FrameProfiler::StageScope::StageScope(FrameProfiler &profiler, const Stage stage)

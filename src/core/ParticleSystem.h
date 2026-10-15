@@ -9,13 +9,13 @@
 //DEBUG ONLY MODE
 #define assertMax(toCheck) assert(toCheck <= maxN);
 
-template<size_t maxN>
+//6 faces - 2 triangles - 3 verticies
+template<size_t maxN, size_t vertsPerParticle = 6 * 2 * 3>
 class ParticleSystem {
 public:
-    virtual ~ParticleSystem() = default;
+    virtual ~ParticleSystem() = default; //no need to use destructor, only Dispose()
 
     std::array<Vector, maxN> particlePosition{};
-    std::array<Vector, maxN> particleUpNormals{};
     size_t nParticles{0}; //visible particles not max particles
 
     Bounds particleRenderBounds{Vector(1, 1, 1)};
@@ -30,23 +30,31 @@ public:
     SDL_GPUBuffer *buffer{nullptr};
     SDL_GPUDevice *device{nullptr};
 
-    std::array<Vertex3D, maxN * 6 * 2 * 3> lastFrameParticleVerticies{};
+    std::array<Vertex3D, maxN * vertsPerParticle> lastFrameParticleVerticies{};
     bool buffersDirty{true};
 
     bool toBeDestroyed{false};
 
-    [[nodiscard]] size_t numVerticies() const {
-        return nParticles * 6 * 2 * 3; //6 face 2 triangle 3 verticie
+    [[nodiscard]] virtual size_t numVerticies() const {
+        return nParticles * vertsPerParticle;
     }
 
     //replace destructor
     virtual void Dispose() = 0;
 
+    void DisposeBuffers() {
+        this->toBeDestroyed = true;
+
+        if (this->buffer) SDL_ReleaseGPUBuffer(this->device, this->buffer);
+        if (this->transferBuffer) SDL_ReleaseGPUTransferBuffer(this->device, this->transferBuffer);
+
+        this->buffer = nullptr;
+        this->transferBuffer = nullptr;
+    }
+
     virtual void UpdateParticleSystem() = 0;
 
-    virtual void InsertParticles(const std::vector<Vector> &, const std::vector<Vector> &, const std::vector<Vector> &) = 0;
-
-    virtual void InsertParticlesByArray(const Vector *, const Vector *, const Vector *, const float *, size_t) = 0;
+    virtual void InsertParticlesByArray(const Vector *particlesPositions, const Vector *particleUpNormals, const Vector *particleVelocites, const float *ParticleScaleMultipliers, size_t numParticles) = 0;
 
     virtual void Upload() = 0;
 

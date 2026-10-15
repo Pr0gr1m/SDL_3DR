@@ -11,6 +11,7 @@ class GenericParticleSystem : public ParticleSystem<maxN> {
 public:
     std::array<Vector, maxN> particleVelocities{};
     std::array<float, maxN> particleScaleMultipliers{};
+    std::array<Vector, maxN> particleUpNormals{};
 
     int64_t particleLifetimeMSeconds{};
 
@@ -49,8 +50,6 @@ public:
     float GetParticleTransparency(float);
 
     void UpdateParticleSystem() override;
-
-    void InsertParticles(const std::vector<Vector> &, const std::vector<Vector> &, const std::vector<Vector> &) override;
 
     void InsertParticlesByArray(const Vector *, const Vector *, const Vector *, const float *particleScaleMultipliers, size_t) override;
 
@@ -152,20 +151,6 @@ void GenericParticleSystem<nMax>::UpdateParticleSystem() {
     }
 
     this->lastFrameParticleVerticies = std::move(particleVerticies);
-}
-
-template<size_t maxN>
-void GenericParticleSystem<maxN>::InsertParticles(const std::vector<Vector> &positions, const std::vector<Vector> &upNormals, const std::vector<Vector> &velocities) {
-    if (this->toBeDestroyed) return;
-
-    assertMax(this->nParticles + positions.size())
-    this->buffersDirty = true;
-
-    for (size_t i = 0; i < positions.size(); i++) {
-        this->particlePosition[this->nParticles + i] = positions[i];
-        this->particleUpNormals[this->nParticles + i] = upNormals[i];
-        this->particleVelocities[this->nParticles + i] = velocities[i];
-    }
 }
 
 template<size_t maxN>

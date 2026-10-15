@@ -291,9 +291,9 @@ SDL_AppResult App::Init() {
         presentModeName = "unknown";
     }
 
-    //Exit out of build directory
-    std::string vPath = std::string(basePath) + kVertexShaderPath; //"/shaders/vertex.spv";
-    std::string fPath = std::string(basePath) + kFragmentShaderPath; //"/shaders/fragment.spv";
+    std::string vPath = std::string(basePath) + kVertexShaderPath;
+    std::string fPath = std::string(basePath) + kFragmentShaderPath;
+    std::string bPath = std::string(basePath) + kBlandColourShaderPath;
 
     size_t vertexShaderCodeSize;
     void *vertexShaderCode = SDL_LoadFile(vPath.c_str(), &vertexShaderCodeSize);
@@ -399,10 +399,43 @@ SDL_AppResult App::Init() {
     SDL_free(fragmentShaderCode);
     SDL_free(lineFragmentShaderCode);
 
+    SLog2("Creating bland colour shader");
+    size_t blandColourShaderSize;
+    void *blandColourShaderCode = SDL_LoadFile(bPath.c_str(), &blandColourShaderSize);
+
+    if (vertexShaderCodeSize == 0) {
+        SDL_free(vertexShaderCode);
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to load vertex shader: %s", SDL_GetError());
+        return FAILURE;
+    }
+
+    SLog2("Loaded vertex shader from %s, size: %zu", bPath.c_str(), vertexShaderCodeSize);
+    SDL_GPUShaderCreateInfo blandColourShaderInfo{
+        .code_size = blandColourShaderSize,
+        .code = static_cast<Uint8 *>(blandColourShaderCode),
+        .entrypoint = "main",
+        .format = SDL_GPU_SHADERFORMAT_SPIRV,
+        .stage = SDL_GPU_SHADERSTAGE_FRAGMENT,
+        .num_samplers = 0,
+        .num_storage_textures = 0,
+        .num_storage_buffers = 0,
+        .num_uniform_buffers = 0,
+        .props = 0
+    };
+
+    SDL_GPUShader *blandColourShader = SDL_CreateGPUShader(m_gpuDevice.get(), &blandColourShaderInfo);
+
+    if (blandColourShader == nullptr) {
+        SDL_LogError(APP_LOG_CATEGORY_GENERIC, "Failed to create vertex shader: %s", SDL_GetError());
+        return FAILURE;
+    }
+
+    SLog2("Vertex shader created: %p", blandColourShader);
+    SDL_free(blandColourShaderCode);
+
     SLog2("Creating GPU pipelines infos %llu ms...", SDL_GetTicks());
 
     //Create the graphics pipeline info for the TRIANGLE LIST pipeline
-
     //Describe the vertex buffers
     SDL_GPUVertexBufferDescription vertexBufferDesctiptions[1];
     vertexBufferDesctiptions[0].slot = 0;
@@ -491,6 +524,12 @@ SDL_AppResult App::Init() {
         .primitive_type = SDL_GPU_PRIMITIVETYPE_LINELIST
     };
 
+    SDL_GPUGraphicsPipelineCreateInfo starPipelineInfo{
+        .vertex_shader = vertexShader, // still alive here — do this before you release it
+        .fragment_shader = blandColourShader,
+        .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST
+    };
+
     pipelineInfo.vertex_input_state.num_vertex_buffers = 1;
     pipelineInfo.vertex_input_state.vertex_buffer_descriptions = vertexBufferDesctiptions;
     pipelineInfo.vertex_input_state.num_vertex_attributes = sizeof(vertexAttributes) / sizeof(SDL_GPUVertexAttribute); //2: position, color
@@ -511,6 +550,12 @@ SDL_AppResult App::Init() {
     pipelineLineInfo.target_info.color_target_descriptions = &colorTargetDescriptions;
     pipelineLineInfo.target_info.has_depth_stencil_target = true;
     pipelineLineInfo.target_info.depth_stencil_format = depthInfo.format;
+
+    //for star pipeline just copy existing pipeline info
+    starPipelineInfo.vertex_input_state = pipelineInfo.vertex_input_state;
+    starPipelineInfo.target_info = pipelineInfo.target_info;
+    starPipelineInfo.depth_stencil_state = pipelineInfo.depth_stencil_state;
+    starPipelineInfo.rasterizer_state = pipelineInfo.rasterizer_state;
 
     //enable depth testing
     pipelineInfo.depth_stencil_state.enable_depth_test = true;
@@ -535,6 +580,7 @@ SDL_AppResult App::Init() {
     SLog2("Creating GPU pipelines %llu ms...", SDL_GetTicks());
     graphicsPipeline = SDL_CreateGPUGraphicsPipeline(m_gpuDevice.get(), &pipelineInfo);
     lineGraphicsPipeline = SDL_CreateGPUGraphicsPipeline(m_gpuDevice.get(), &pipelineLineInfo);
+    starGraphicsPipeline = SDL_CreateGPUGraphicsPipeline(m_gpuDevice.get(), &starPipelineInfo);
     SLog2("Graphics pipelines created: %p", graphicsPipeline);
 
     if (!graphicsPipeline || !lineGraphicsPipeline) {
@@ -574,9 +620,9 @@ SDL_AppResult App::Init() {
     toBeConstructedChunkPositions.reserve(8);
 
     //Construct default chunk
-    ConstructChunkAtLine(Vector(0, 0, 0));
+    ConstructChunkLineAtPosition(Vector(0, 0, 0));
 
-    chunkConstructionThread = std::jthread([this](std::stop_token st) {
+    chunkConstructionThread = std::jthread([this](const std::stop_token &st) {
         int safetyLimit = 0;
         while (!st.stop_requested()) {
             if (safetyLimit >= 1000) break;
@@ -606,6 +652,40 @@ SDL_AppResult App::Init() {
     });
 
     SLog1("%zu chunks", chunkManager->worldChunks.size());
+
+    SkyStarsParticleSystem<skyStarsMaxParticles> skyStarsParticleSystem;
+    skyStarsParticleSystem.daytimeFade = 1;
+    skyStarsParticleSystem.device = m_gpuDevice.get();
+
+    std::array<Vector, skyStarsMaxParticles> particlePositions;
+    std::array<float, skyStarsMaxParticles> particleScaleMultipliers{};
+
+    Vector epsilon = Vector(Epsilon, Epsilon, Epsilon);
+
+    for (size_t i = 0; i < skyStarsMaxParticles; i += 1) {
+        auto noiseCoords = Vector(1.24, 4.21, 2.41) * i + epsilon;
+
+        float noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z); //Height
+        float noiseB = SimplexNoise::noise(noiseCoords.z, noiseCoords.x); //Width
+
+        noiseA += 0.85f;
+        noiseA /= 2;
+        noiseA *= M_PI;
+        noiseB *= 2 * M_PI;
+
+        particlePositions[i] = Vector(noiseA, 0.45f, noiseB);
+
+        noiseCoords += Vector(i * 1.33f, 0, i * 0.71f);
+
+        noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z);
+        noiseA = std::fmod(noiseA, 1) + 0.85;
+        noiseA -= 1.75f;
+
+        particleScaleMultipliers[i] = noiseA;
+    }
+
+    skyStarsParticleSystem.InsertParticlesByArray(&particlePositions[0], &particleScaleMultipliers[0], skyStarsMaxParticles);
+    this->skyStarsParticleSystem = std::make_unique<SkyStarsParticleSystem<skyStarsMaxParticles> >(skyStarsParticleSystem);
 
     chunkMeshStore = std::make_unique<ChunkMeshStore>(m_gpuDevice.get());
 
@@ -708,31 +788,21 @@ SDL_AppResult App::Event(const SDL_Event *event) {
                     std::array<float, numBreakParticles> breakParticleScaleMultipliers{};
                     Vector epsilon = Vector(Epsilon, Epsilon, Epsilon);
                     for (size_t i = 0; i < numBreakParticles; i += 1) {
-                        auto noiseCoords = result.blockPosition + epsilon + Vector(i * 1.37f, i * 2.19f, i * 0.73f);
+                        auto noiseCoords = result.blockPosition + epsilon + Vector(result.blockPosition.y * i * 1.37f, 0, i * 0.73f);
 
                         float noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z);
                         float noiseB = SimplexNoise::noise(noiseCoords.z, noiseCoords.x);
 
-                        noiseA *= 0.75f;
-                        noiseB *= 0.75f;
+                        //noiseA *= 0.45f;
+                        //noiseB *= 0.45f;
 
-                        // if (noiseA < 0) {
-                        //     noiseA = -1 + (noiseA + 1) * 1.35f;
-                        // } else {
-                        //     noiseA = noiseA * 0.65f + 0.05f;
-                        // }
-                        //
-                        // if (noiseB < 0) {
-                        //     noiseB = -1 + (noiseB + 1) * 1.35f;
-                        // } else {
-                        //     noiseB = noiseB * 0.65f + 0.05f;
-                        // }
+                        noiseA *= 0.05f;
+                        noiseB *= 0.05f;
 
                         Vector particlePosition = Vector(noiseA, 0.45f, noiseB); //to be used later
                         breakParticlesPositions[i] = particlePosition;
 
-                        noiseCoords += result.blockPosition + epsilon + Vector(i * 1.33f, i * 2.79f, i * 0.71f);
-                        //noiseCoords += result.blockPosition + Vector(noiseA, 0, noiseB);
+                        noiseCoords += result.blockPosition + epsilon + Vector(i * 1.33f, 0, i * 0.71f);
 
                         noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z);
                         noiseB = SimplexNoise::noise(noiseCoords.z, noiseCoords.x);
@@ -742,24 +812,12 @@ SDL_AppResult App::Event(const SDL_Event *event) {
 
                         noiseCoords += result.blockPosition + epsilon + Vector(i * 1.33f, i * 2.79f, i * 0.71f);
 
-                        //make noise a and b [0.35, 1.35] (it will be normalized anyway)
-                        // noiseA += 1;
-                        // noiseA *= 0.5f;
-                        // noiseA += 0.35f;
-
-                        // noiseB += 1;
-                        // noiseB *= 0.5f;
-                        // noiseB += 0.35f;
-                        // noiseA *= SimplexNoise::noise(noiseCoords.x, noiseCoords.z) > 1 ? 1 : -1;
-                        // noiseB *= SimplexNoise::noise(noiseCoords.z, noiseCoords.x) > 1 ? 1 : -1;
-
-                        //breakParticlesVelocites[i] = Vector((noiseB + 1) * 0.5f, 1, (noiseA + 1) * 0.5f).Normalized() * 0.05f;
                         breakParticlesVelocities[i] = Vector(noiseA, .75f, noiseB).Normalized() * 1.25f;
 
                         noiseA = SimplexNoise::noise(noiseCoords.x, noiseCoords.z);
-                        noiseA = fmod(noiseA, 1.65) + 0.85;
+                        noiseA = std::fmod(noiseA, 1.15) + 0.85;
 
-                        noiseCoords += result.blockPosition + epsilon + Vector(i * 1.37f, i * 2.19f, i * 0.73f);
+                        noiseCoords += result.blockPosition + epsilon + Vector(i * 1.37f, 0, i * 0.73f);
 
                         breakParticleScaleMultipliers[i] = noiseA;
 
@@ -861,6 +919,10 @@ void App::Quit(SDL_AppResult result) {
         //if (particleSystem->buffer) SDL_ReleaseGPUBuffer(m_gpuDevice.get(), particleSystem->buffer);
     }
 
+    if (this->skyStarsParticleSystem) {
+        skyStarsParticleSystem->Dispose();
+    }
+
     if (chunkMeshStore) {
         chunkMeshStore->ReleaseAll();
     }
@@ -871,6 +933,10 @@ void App::Quit(SDL_AppResult result) {
 
     if (lineGraphicsPipeline) {
         SDL_ReleaseGPUGraphicsPipeline(m_gpuDevice.get(), lineGraphicsPipeline);
+    }
+
+    if (starGraphicsPipeline) {
+        SDL_ReleaseGPUGraphicsPipeline(m_gpuDevice.get(), starGraphicsPipeline);
     }
 
     if (depthTexture) {
@@ -920,7 +986,7 @@ void App::BuildToBeConstructedChunks() {
 
     for (const auto &chunkPosition: toBeConstructedChunkPositions) {
         if (chunkManager->findChunk(chunkPosition) == nullptr) {
-            ConstructChunkAtLine(chunkPosition.toVector());
+            ConstructChunkLineAtPosition(chunkPosition.toVector());
 
             auto lookup = ChunkManager::chunkLookupFromBlockPosition(chunkPosition.toVector());
             chunkManager->markNeighborDirty(lookup, 0, 1);
@@ -1291,10 +1357,20 @@ SDL_AppResult App::OnUpdate() {
         }
     }
 
-
+    //keep reset of particlesystem outside of first loop
     for (auto &particleSystem: particleSystems) {
         if (particleSystem->toBeDestroyed) {
             particleSystem.reset();
+        }
+    }
+
+    if (this->skyStarsParticleSystem) {
+        this->skyStarsParticleSystem->TickParticleSystem(deltaTimeMS);
+        if (!this->skyStarsParticleSystem->toBeDestroyed) {
+            this->skyStarsParticleSystem->worldOffset = Vector(sceneCamera->Position.x, 0, sceneCamera->Position.z);
+            this->skyStarsParticleSystem->UpdateParticleSystem();
+        } else {
+            this->skyStarsParticleSystem.reset();
         }
     }
 
@@ -1333,7 +1409,7 @@ SDL_AppResult App::OnUpdate() {
     return CONTINUE;
 }
 
-void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
+void App::ConstructChunkLineAtPosition(Vector atPos, bool flat) const {
     std::vector<Chunk<ChunkManager::chunkSizeXYZ> > yChunks;
     for (int x = 0; x < ChunkManager::chunkSizeXYZ; x += 1) {
         for (int z = 0; z < ChunkManager::chunkSizeXYZ; z += 1) {
@@ -1346,7 +1422,7 @@ void App::ConstructChunkAtLine(Vector atPos, bool flat) const {
             rawNoiseVal = rawNoiseVal + 1; //[0,1]
             rawNoiseVal = rawNoiseVal * 2; //[0,2]
             if (true) {
-                rawNoiseValInt = toInt<double>(pow(1.5, rawNoiseVal));
+                rawNoiseValInt = toInt<double>(pow(generationPowerBase, rawNoiseVal));
             }
 
             int distToGroundZero = rawNoiseValInt - groundZeroYLevel;
@@ -1525,8 +1601,6 @@ SDL_AppResult App::OnRender() {
         frameProfiler.AddCount(FrameProfiler::Counter::BytesUploaded, bytesToUpload);
     }
 
-    //std::vector<std::unique_ptr<ParticleSystem<particleSystemMaxParticles> > > particleSystemsCopy;
-
     if (!particleSystems.empty()) {
         SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
         for (auto &ParticleSystem: particleSystems) {
@@ -1537,28 +1611,28 @@ SDL_AppResult App::OnRender() {
 
             ParticleSystem->Upload();
 
-            // if (ParticleSystem->buffer) SDL_ReleaseGPUBuffer(m_gpuDevice.get(), ParticleSystem->buffer);
-            // ParticleSystem->buffer = nullptr;
-            //
-            // const auto bytes = std::bit_ceil(static_cast<Uint32>(sizeof(Vertex3D) * ParticleSystem->lastFrameParticleVerticies.size()));
-            //
-            // SDL_GPUBufferCreateInfo bufferInfo{};
-            // bufferInfo.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-            // bufferInfo.size = bytes;
-            // ParticleSystem->buffer = SDL_CreateGPUBuffer(m_gpuDevice.get(), &bufferInfo);
-
             const SDL_GPUTransferBufferLocation source = {ParticleSystem->transferBuffer, static_cast<Uint32>(0)};
             const SDL_GPUBufferRegion destination = {ParticleSystem->buffer, 0, std::bit_ceil(static_cast<Uint32>(sizeof(Vertex3D) * ParticleSystem->lastFrameParticleVerticies.size()))};
             SDL_UploadToGPUBuffer(copyPass, &source, &destination, true);
-
-            //particleSystemsCopy.push_back(std::move(ParticleSystem));
         }
         SDL_EndGPUCopyPass(copyPass);
     }
 
-    //particleSystems = std::move(particleSystemsCopy);
+    if (this->skyStarsParticleSystem && skyStarsParticleSystem->nParticles > 0) {
+        SDL_GPUCopyPass *copyPass = SDL_BeginGPUCopyPass(commandBuffer);
+
+        skyStarsParticleSystem->Upload();
+
+        const SDL_GPUTransferBufferLocation source = {skyStarsParticleSystem->transferBuffer, static_cast<Uint32>(0)};
+        const SDL_GPUBufferRegion destination = {skyStarsParticleSystem->buffer, 0, static_cast<Uint32>(std::bit_ceil(sizeof(Vertex3D) * skyStarsParticleSystem->numVerticies()))};
+
+        SDL_UploadToGPUBuffer(copyPass, &source, &destination, false);
+
+        SDL_EndGPUCopyPass(copyPass);
+    }
 
     stageScope.emplace(frameProfiler, FrameProfiler::Stage::Acquire);
+
     //Acquire the swapchain texture for rendering
     SDL_GPUTexture *swapchainTexture;
     if (!SDL_WaitAndAcquireGPUSwapchainTexture(commandBuffer, m_Window.get(), &swapchainTexture, nullptr, nullptr)) {
@@ -1578,7 +1652,9 @@ SDL_AppResult App::OnRender() {
     //Set up the colour target info for the render pass
     SDL_GPUColorTargetInfo colorTargetInfo = {};
     colorTargetInfo.texture = swapchainTexture;
-    colorTargetInfo.clear_color = (SDL_FColor){0.1f, 0.1f, 0.2f, 1.0f}; //dark blue-grey
+    float x = 0.025f;
+    float y = x * 1.25f;
+    colorTargetInfo.clear_color = (SDL_FColor){x, x, y, 1.0f}; //{0.1f, 0.1f, 0.2f, 1.0f}; //dark blue-grey
     colorTargetInfo.load_op = SDL_GPU_LOADOP_CLEAR;
     colorTargetInfo.store_op = SDL_GPU_STOREOP_STORE;
 
@@ -1609,6 +1685,25 @@ SDL_AppResult App::OnRender() {
 
     Uint64 verticesDrawn = 0;
     Uint64 chunksDrawn = 0;
+    Uint64 particleVerticesDrawn = 0;
+    if (this->skyStarsParticleSystem && this->skyStarsParticleSystem->nParticles > 0) {
+        uniforms.chunkOffset[0] = 0;
+        uniforms.chunkOffset[1] = 0;
+        uniforms.chunkOffset[2] = 0;
+
+        SDL_PushGPUVertexUniformData(commandBuffer, 0, &uniforms, sizeof(uniforms));
+
+        SDL_BindGPUGraphicsPipeline(renderPass, starGraphicsPipeline); //bind star graphics pipeline
+
+        const SDL_GPUBufferBinding vertexBinding = {this->skyStarsParticleSystem->buffer, 0};
+        SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
+        SDL_DrawGPUPrimitives(renderPass, skyStarsParticleSystem->numVerticies(), 1, 0, 0);
+
+        SDL_BindGPUGraphicsPipeline(renderPass, graphicsPipeline);
+
+        particleVerticesDrawn += skyStarsParticleSystem->numVerticies();
+    }
+
     for (const auto &[chunkLookup, mesh]: chunkMeshStore->Meshes()) {
         if (mesh.vertexCount == 0 || !IsChunkInFrustum(*sceneCamera, chunkLookup)) continue;
 
@@ -1625,7 +1720,6 @@ SDL_AppResult App::OnRender() {
         chunksDrawn += 1;
     }
 
-    //for (const auto &[chunkLookup, mesh]: chunkMeshStore->Meshes()) {
     for (const auto &ParticleSystem: particleSystems) {
         if (ParticleSystem->nParticles == 0) continue;
 
@@ -1638,10 +1732,13 @@ SDL_AppResult App::OnRender() {
         const SDL_GPUBufferBinding vertexBinding = {ParticleSystem->buffer, 0};
         SDL_BindGPUVertexBuffers(renderPass, 0, &vertexBinding, 1);
         SDL_DrawGPUPrimitives(renderPass, ParticleSystem->numVerticies(), 1, 0, 0);
+
+        particleVerticesDrawn += ParticleSystem->numVerticies();
     }
 
     frameProfiler.AddCount(FrameProfiler::Counter::VerticesDrawn, verticesDrawn);
     frameProfiler.AddCount(FrameProfiler::Counter::ChunksDrawn, chunksDrawn);
+    frameProfiler.AddCount(FrameProfiler::Counter::ParticleVerticiesDrawn, particleVerticesDrawn);
 
     SDL_EndGPURenderPass(renderPass);
 

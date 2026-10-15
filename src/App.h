@@ -12,6 +12,7 @@
 #include "core/ChunkManager.h"
 #include "core/ParticleSystem.h"
 #include "core/Player.h"
+#include "core/SkyStarsParticleSystem.h"
 #include "core/TextureManager.h"
 
 /**
@@ -81,6 +82,7 @@ private:
     std::unique_ptr<Player> player = nullptr;
 
     std::vector<std::unique_ptr<ParticleSystem<particleSystemMaxParticles> > > particleSystems;
+    std::unique_ptr<SkyStarsParticleSystem<skyStarsMaxParticles> > skyStarsParticleSystem;
 
     Vector cubeVerticies[8] =
     {
@@ -114,7 +116,7 @@ private:
     SDL_AppResult OnUpdate();
 
     // void ConstructChunkAt(int, int, bool flat = false) const;
-    void ConstructChunkAtLine(Vector, bool flat = false) const;
+    void ConstructChunkLineAtPosition(Vector, bool flat = false) const;
 
     [[nodiscard]] RaycastHit CheckIsPointInsideAny(Vector) const;
 
@@ -132,6 +134,7 @@ private:
 
     SDL_GPUGraphicsPipeline *graphicsPipeline = nullptr;
     SDL_GPUGraphicsPipeline *lineGraphicsPipeline = nullptr;
+    SDL_GPUGraphicsPipeline *starGraphicsPipeline = nullptr;
 
     SDL_GPUTexture *depthTexture = nullptr;
 
@@ -144,6 +147,7 @@ private:
 
     const char *kVertexShaderPath = {"shaders/vertex.spv"};
     const char *kFragmentShaderPath = {"shaders/fragment.spv"};
+    const char *kBlandColourShaderPath = {"shaders/blandColour.spv"};
 
     FrameProfiler frameProfiler{kFreeModeProfilerWindowFrames};
     const char *presentModeName = "unknown";

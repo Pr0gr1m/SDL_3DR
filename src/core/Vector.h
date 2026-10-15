@@ -24,6 +24,7 @@ public:
     Vector(float x, float y, float z) : x(x), y(y), z(z) {
     }
 
+
     ///Returns an Int3 containing Vector's fields as integers
     Int3 toInt3() const;
 
@@ -60,6 +61,11 @@ public:
     }
 
     Vector operator*(int a) const {
+        return Vector(x * a, y * a, z * a);
+    }
+
+    template<typename N> requires (std::is_integral_v<N>)
+    Vector operator*(N a) const {
         return Vector(x * a, y * a, z * a);
     }
 

@@ -75,9 +75,11 @@ inline extern constexpr RaycastHit RaycastHit_NULL = {};
 inline constexpr int numPlayerSlots = 2;
 
 inline constexpr size_t particleSystemMaxParticles = 20;
+inline constexpr size_t skyStarsMaxParticles = 300; //3x less heavy than normal particles
 
-inline constexpr float noiseFrequency = 0.05f;
+inline constexpr float noiseFrequency = 0.03f;
 inline constexpr float noiseAmplitude = 2.f;
+inline constexpr double generationPowerBase = 1.64;
 
 inline constexpr float defaultScreenWidth = 1920;
 inline constexpr float defaultScreenHeight = 1080;

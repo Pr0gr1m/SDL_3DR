@@ -40,8 +40,8 @@ add_executable(${PROJECT_NAME} src/main.cpp
         src/core/Block.h
         src/core/ParticleSystem.h
         src/core/Bounds.h
-        src/core/GenericParticleSystem.cpp
         src/core/GenericParticleSystem.h
+        src/core/SkyStarsParticleSystem.h
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_SOURCE_DIR}/src)

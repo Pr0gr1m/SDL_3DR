@@ -10,6 +10,7 @@
  *@class FrameProfiler
  *@brief Collects per-stage frame timings and per-frame counters over a window of frames and logs a report
 **/
+
 class FrameProfiler {
 public:
     enum class Stage {
@@ -25,10 +26,14 @@ public:
     enum class Counter {
         VerticesDrawn,
         ChunksDrawn,
+        ParticleVerticiesDrawn,
         ChunksRemeshed,
         BytesUploaded,
         Count
     };
+
+    static constexpr size_t kStageCount = static_cast<size_t>(Stage::Count);
+    static constexpr size_t kCounterCount = static_cast<size_t>(Counter::Count);
 
     /**
      *@class StageScope
@@ -64,9 +69,6 @@ public:
     void Report() const;
 
 private:
-    static constexpr size_t kStageCount = static_cast<size_t>(Stage::Count);
-    static constexpr size_t kCounterCount = static_cast<size_t>(Counter::Count);
-
     struct FrameSample {
         std::array<double, kStageCount> stageMs{};
         std::array<Uint64, kCounterCount> counters{};
